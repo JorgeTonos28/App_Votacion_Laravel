@@ -18,8 +18,10 @@ class JuryController extends Controller
 {
     public function __construct(private readonly AccessService $access, private readonly EventSessionService $sessions, private readonly EventQueryService $queries, private readonly VoteService $votes) {}
 
-    public function access(?string $eventCode = null)
+    public function access(Request $request)
     {
+        $eventCode = $request->query('event');
+
         return view('jury.access', compact('eventCode'));
     }
 

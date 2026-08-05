@@ -71,6 +71,10 @@ Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::post('/admin/eventos/{event}/archivar', [AdminController::class, 'archive'])->name('admin.events.archive');
     Route::post('/admin/participantes/agregar', [AdminController::class, 'addParticipant'])->name('admin.participants.add');
     Route::post('/admin/eventos/{event}/participantes/importar', [AdminController::class, 'importParticipants'])->name('admin.participants.import');
+    Route::get('/admin/participantes/{participant}/editar', [AdminController::class, 'editParticipant'])->name('admin.participants.edit');
+    Route::post('/admin/participantes/{participant}/editar', [AdminController::class, 'updateParticipant'])->name('admin.participants.update');
+    Route::post('/admin/participantes/{participant}/estado', [AdminController::class, 'changeParticipantStatus'])->name('admin.participants.status');
+    Route::post('/admin/participantes/{participant}/eliminar', [AdminController::class, 'deleteParticipant'])->name('admin.participants.delete');
     Route::get('/api/admin/jurados/buscar', [AdminController::class, 'searchJurors'])->name('admin.jurors.search');
     Route::post('/admin/jurados/agregar', [AdminController::class, 'addJuror'])->name('admin.jurors.add');
     Route::post('/admin/jurados/{juror}/regenerar', [AdminController::class, 'regenerateJuror'])->name('admin.jurors.regenerate');

@@ -149,7 +149,7 @@ class AdminController extends Controller
                 }
             }
 
-return $clone;
+            return $clone;
         });
 
         return redirect()->route('admin.events.edit', $clone)->with('success', "Evento clonado con el código {$clone->code}.");
@@ -167,7 +167,7 @@ return $clone;
 
     public function participants(VotingEvent $event)
     {
-        $participants = Participant::query()->where('event_id', $event->id)->orderBy('presentation_order')->get();
+        $participants = Participant::query()->with('presentation')->where('event_id', $event->id)->orderBy('presentation_order')->get();
 
         return view('admin.participants', compact('event', 'participants'));
     }
@@ -191,6 +191,9 @@ return $clone;
     public function importParticipants(Request $request, VotingEvent $event)
     {
         $request->validate(['csv' => 'required|file|max:2048']);
+        if (Presentation::query()->where('event_id', $event->id)->where('status', '!=', 'Pending')->exists()) {
+            throw new DomainException('CONFIGURATION_LOCKED', 'No puedes importar participantes después de iniciar el evento.');
+        }
         $rows = file($request->file('csv')->getRealPath(), FILE_IGNORE_NEW_LINES);
         $order = (int) Participant::query()->where('event_id', $event->id)->max('presentation_order');
         foreach (array_slice($rows, 1) as $line) {
@@ -202,7 +205,93 @@ return $clone;
             Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'sequence' => $order]);
         }
 
-return back()->with('success', 'Participantes importados.');
+        return back()->with('success', 'Participantes importados.');
+    }
+
+    public function editParticipant(Participant $participant)
+    {
+        $participant->load(['event', 'presentation']);
+        $event = $participant->event;
+
+        return view('admin.participant-edit', compact('event', 'participant'));
+    }
+
+    public function updateParticipant(Request $request, Participant $participant)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:180',
+            'project_title' => 'nullable|string|max:240',
+            'members' => 'nullable|string|max:1000',
+            'area' => 'nullable|string|max:160',
+            'description' => 'nullable|string|max:3000',
+        ]);
+        $previous = $participant->only(['name', 'project_title', 'members', 'area', 'description']);
+        $payload = collect($data)->map(fn ($value) => is_string($value) ? (trim($value) ?: null) : $value)->all();
+        $payload['name'] = trim($data['name']);
+        $participant->update($payload);
+        $this->audit->write($participant->event_id, 'Administrator', (string) $request->user()->id, 'PARTICIPANT_UPDATED', 'Participant', $participant->id, $previous, $participant->only(array_keys($previous)));
+
+        return redirect()->route('admin.participants', $participant->event_id)->with('success', 'La información del equipo fue actualizada.');
+    }
+
+    public function changeParticipantStatus(Request $request, Participant $participant)
+    {
+        $data = $request->validate([
+            'status' => 'required|in:Active,Disqualified',
+            'reason' => 'nullable|required_if:status,Disqualified|string|min:8|max:1000',
+        ]);
+        $participant->load(['event', 'presentation']);
+        if ($participant->event->status === 'Published') {
+            throw new DomainException('RESULTS_ALREADY_PUBLISHED', 'Oculta los resultados antes de cambiar el estado de un equipo.');
+        }
+        if ($participant->presentation && $participant->event->active_presentation_id === $participant->presentation->id) {
+            throw new DomainException('PARTICIPANT_IS_ACTIVE', 'No puedes inhabilitar el equipo que está activo en el escenario.');
+        }
+
+        $previous = ['status' => $participant->status, 'reason' => $participant->disqualification_reason];
+        DB::transaction(function () use ($participant, $data) {
+            $isDisabled = $data['status'] === 'Disqualified';
+            $participant->update([
+                'status' => $data['status'],
+                'disqualification_reason' => $isDisabled ? trim($data['reason']) : null,
+            ]);
+            if ($participant->presentation?->status === 'Pending' && $isDisabled) {
+                $participant->presentation->update(['status' => 'Disqualified']);
+            } elseif ($participant->presentation?->status === 'Disqualified' && ! $isDisabled) {
+                $participant->presentation->update(['status' => 'Pending']);
+            }
+        });
+        $this->audit->write($participant->event_id, 'Administrator', (string) $request->user()->id, 'PARTICIPANT_STATUS_CHANGED', 'Participant', $participant->id, $previous, ['status' => $participant->status, 'reason' => $participant->disqualification_reason]);
+        if (VotingResult::query()->where('event_id', $participant->event_id)->exists()) {
+            $this->results->calculate($participant->event_id, (string) $request->user()->id);
+        }
+
+        $message = $data['status'] === 'Disqualified' ? 'El equipo fue inhabilitado y ya no participará en el ranking.' : 'El equipo fue habilitado nuevamente.';
+
+        return back()->with('success', $message);
+    }
+
+    public function deleteParticipant(Request $request, Participant $participant)
+    {
+        $participant->load(['event', 'presentation']);
+        if ($participant->event->status === 'Published') {
+            throw new DomainException('RESULTS_ALREADY_PUBLISHED', 'Oculta los resultados antes de eliminar un equipo.');
+        }
+        if ($participant->presentation && $participant->event->active_presentation_id === $participant->presentation->id) {
+            throw new DomainException('PARTICIPANT_IS_ACTIVE', 'No puedes eliminar el equipo que está activo en el escenario.');
+        }
+        if (Vote::query()->where('participant_id', $participant->id)->exists()) {
+            throw new DomainException('PARTICIPANT_HAS_VOTES', 'Este equipo ya tiene votos. Inhabilítalo para conservar la integridad del evento.');
+        }
+
+        $eventId = $participant->event_id;
+        $participantName = $participant->name;
+        DB::transaction(function () use ($participant, $request, $eventId, $participantName) {
+            $this->audit->write($eventId, 'Administrator', (string) $request->user()->id, 'PARTICIPANT_DELETED', 'Participant', $participant->id, ['name' => $participantName]);
+            $participant->delete();
+        });
+
+        return redirect()->route('admin.participants', $eventId)->with('success', "El equipo {$participantName} fue eliminado.");
     }
 
     public function jurors(VotingEvent $event)
@@ -388,7 +477,7 @@ return back()->with('success', 'Participantes importados.');
             $this->results->calculate($event->id, (string) $request->user()->id);
         }
 
-return back()->with('success', 'Estado actualizado.');
+        return back()->with('success', 'Estado actualizado.');
     }
 
     public function eventResults(VotingEvent $event)
@@ -481,7 +570,7 @@ return back()->with('success', 'Estado actualizado.');
         return in_array($event->status, ['Live', 'Paused', 'Finished', 'Published', 'Archived'], true) || Presentation::query()->where('event_id', $event->id)->where('status', '!=', 'Pending')->exists();
     }
 
-    private function addDefaultRubrics(VotingEvent $event,float $juryWeight,float $publicWeight): void
+    private function addDefaultRubrics(VotingEvent $event, float $juryWeight, float $publicWeight): void
     {
         foreach ([['Jurado', 'Jury', $juryWeight, [['Claridad', 'La propuesta se comunica con precisión.', .25], ['Innovación', 'La solución presenta un enfoque novedoso.', .25], ['Impacto', 'La propuesta genera valor verificable.', .25], ['Presentación', 'El equipo argumenta y demuestra su solución.', .25]]], ['Público', 'Public', $publicWeight, [['Claridad del resultado', 'La propuesta se entiende fácilmente.', .34], ['Utilidad', 'La solución parece aplicable y valiosa.', .33], ['Presentación', 'El equipo comunica bien su proceso.', .33]]]] as $gi => $g) {
             [$name,$role,$weight,$criteria] = $g;

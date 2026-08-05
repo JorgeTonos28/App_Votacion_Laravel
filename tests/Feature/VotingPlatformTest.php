@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Participant;
+use App\Models\User;
 use App\Models\Vote;
 use App\Models\Voter;
 use App\Models\VotingEvent;
@@ -153,6 +155,71 @@ class VotingPlatformTest extends TestCase
             ->assertOk()
             ->assertJsonPath('ok', true)
             ->assertJsonPath('data.eventCode', 'BTP726');
+    }
+
+    public function test_administrator_can_edit_disable_enable_and_delete_a_participant_without_votes(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $participant = Participant::query()->with('presentation')->where('event_id', $event->id)->orderBy('presentation_order')->firstOrFail();
+        $presentationId = $participant->presentation->id;
+
+        $this->actingAs($admin)
+            ->get(route('admin.participants.edit', $participant))
+            ->assertOk()
+            ->assertSee('Editar equipo');
+
+        $this->actingAs($admin)->post(route('admin.participants.update', $participant), [
+            'name' => 'Equipo QA Renovado',
+            'project_title' => 'Proyecto QA',
+            'members' => 'Ada, Linus',
+            'area' => 'Tecnología',
+            'description' => 'Descripción actualizada para pruebas.',
+        ])->assertRedirect(route('admin.participants', $event));
+        $this->assertDatabaseHas('participants', ['id' => $participant->id, 'name' => 'Equipo QA Renovado', 'project_title' => 'Proyecto QA']);
+
+        $this->actingAs($admin)->post(route('admin.participants.status', $participant), [
+            'status' => 'Disqualified',
+            'reason' => 'Inhabilitado durante la prueba funcional.',
+        ])->assertRedirect();
+        $this->assertDatabaseHas('participants', ['id' => $participant->id, 'status' => 'Disqualified']);
+        $this->assertDatabaseHas('presentations', ['id' => $presentationId, 'status' => 'Disqualified']);
+
+        $this->actingAs($admin)->post(route('admin.participants.status', $participant), ['status' => 'Active'])->assertRedirect();
+        $this->assertDatabaseHas('participants', ['id' => $participant->id, 'status' => 'Active']);
+        $this->assertDatabaseHas('presentations', ['id' => $presentationId, 'status' => 'Pending']);
+
+        $this->actingAs($admin)->post(route('admin.participants.delete', $participant))->assertRedirect(route('admin.participants', $event));
+        $this->assertDatabaseMissing('participants', ['id' => $participant->id]);
+        $this->assertDatabaseMissing('presentations', ['id' => $presentationId]);
+    }
+
+    public function test_public_projection_has_voting_access_and_published_results_are_graphical(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $actorId = (string) Str::uuid();
+        $event->update(['require_quorum_to_publish' => false]);
+        app(ResultService::class)->calculate($event->id, $actorId);
+        app(ResultService::class)->publish($event->id, $actorId);
+
+        $this->get(route('projection.live', $event->code))
+            ->assertOk()
+            ->assertSee('Entrar a votar')
+            ->assertSee('Acceso de jurados')
+            ->assertSee('?event=BTP726', false);
+
+        $this->get(route('projection.ranking', $event->code))
+            ->assertOk()
+            ->assertSee('Podio de ganadores')
+            ->assertSee('Rendimiento por equipo')
+            ->assertSee('ranking-bar-row', false)
+            ->assertSee('Desglose completo');
+
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $this->actingAs($admin)->get(route('admin.live', $event))
+            ->assertOk()
+            ->assertSee('Ver resultados')
+            ->assertSee(route('projection.ranking', $event->code), false);
     }
 
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
