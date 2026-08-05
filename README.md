@@ -53,10 +53,20 @@ Para cPanel recomendamos MySQL/MariaDB en lugar de SQLite. SQLite funciona para 
 ```bash
 composer install --no-dev --optimize-autoloader
 php artisan key:generate --force
-php artisan migrate --force --seed
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
+composer run cpanel:deploy
+php artisan db:seed --force
 ```
 
 Si tu plan no ofrece Terminal/SSH, puedes importar las tablas desde phpMyAdmin, pero es preferible ejecutar las migraciones con Artisan para conservar índices, claves foráneas y futuras actualizaciones. No subas el archivo `.env` al repositorio ni dejes `APP_DEBUG=true` en producción.
+
+### Actualizar desde GitHub
+
+Después de sincronizar una nueva versión del repositorio, ejecuta siempre:
+
+```bash
+cd /home/batallawork/ia.batalla.work.gd
+composer install --no-dev --optimize-autoloader
+composer run cpanel:deploy
+```
+
+El comando `cpanel:deploy` elimina primero las cachés de configuración, rutas y vistas de la versión anterior; luego aplica las migraciones pendientes y reconstruye las cachés con el código recién descargado. Esto evita errores como `Route [...] not defined` cuando una vista nueva se publica junto con rutas nuevas.

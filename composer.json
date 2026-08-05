@@ -49,6 +49,11 @@
             "@php artisan config:clear --ansi @no_additional_args",
             "@php artisan test"
         ],
+        "cpanel:deploy": [
+            "@php artisan optimize:clear --ansi",
+            "@php artisan migrate --force --ansi",
+            "@php artisan optimize --ansi"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi"
