@@ -1,0 +1,2 @@
+@extends('layouts.public') @section('title','No pudimos completar la acción')
+@section('content')<main class="ambient-page"><div class="public-shell"><section class="card identity-card"><div class="success-icon" style="color:var(--error);background:#ffdad6"><span class="material-symbols-outlined">error</span></div><h1>Algo no salió como esperábamos</h1><p>{{ $message }}</p><a class="button button-block" href="{{ route('home') }}">Volver al acceso</a></section></div></main>@endsection

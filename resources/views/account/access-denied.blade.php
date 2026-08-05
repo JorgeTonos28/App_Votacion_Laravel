@@ -1,0 +1,2 @@
+@extends('layouts.public') @section('title','Sin permiso')
+@section('content')<main class="ambient-page"><div class="public-shell"><section class="card identity-card"><div class="identity-avatar"><span class="material-symbols-outlined">lock</span></div><h1>No tienes permiso para esta acción</h1><p>Solicita acceso a un administrador de la plataforma.</p><a class="button button-block" href="{{ route('admin.index') }}">Volver al panel</a></section></div></main>@endsection
