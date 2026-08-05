@@ -29,7 +29,7 @@ class LiveControlService
     public function startPresentation(string $eventId, string $participantId, string $actorId): void
     {
         DB::transaction(function () use ($eventId, $participantId, $actorId) {
-            $event = VotingEvent::query()->with('presentations')->lockForUpdate()->find($eventId);
+            $event = VotingEvent::query()->with('presentations.participant')->lockForUpdate()->find($eventId);
             if (! $event) {
                 throw $this->notFound();
             }
@@ -42,6 +42,9 @@ class LiveControlService
             $presentation = $event->presentations->firstWhere('participant_id', $participantId);
             if (! $presentation) {
                 throw new DomainException('PARTICIPANT_NOT_FOUND', 'No encontramos el participante.', 404);
+            }
+            if ($presentation->participant?->status === 'Disqualified') {
+                throw new DomainException('PARTICIPANT_DISQUALIFIED', 'El equipo está inhabilitado y no puede pasar al escenario.', 409);
             }
             if (in_array($presentation->status, ['Disqualified', 'Scored'], true)) {
                 throw $this->invalidTransition();
@@ -165,16 +168,16 @@ class LiveControlService
             throw $this->invalidTransition();
         }$previous = $event->status;
         $event->update(['status' => $target]);
-        $this->audit->write($eventId,'Operator',$actorId,$action,'Event',$eventId,$previous,$target);
+        $this->audit->write($eventId, 'Operator', $actorId, $action, 'Event', $eventId, $previous, $target);
     }
 
     private function invalidTransition(): DomainException
     {
-        return new DomainException('INVALID_TRANSITION','La acción no es válida para el estado actual.',409);
+        return new DomainException('INVALID_TRANSITION', 'La acción no es válida para el estado actual.', 409);
     }
 
     private function notFound(): DomainException
     {
-        return new DomainException('EVENT_NOT_FOUND','No encontramos el evento.',404);
+        return new DomainException('EVENT_NOT_FOUND', 'No encontramos el evento.', 404);
     }
 }
