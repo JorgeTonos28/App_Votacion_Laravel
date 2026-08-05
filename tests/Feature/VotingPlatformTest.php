@@ -12,6 +12,7 @@ use App\Services\ResultService;
 use App\Services\VoteService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -163,6 +164,17 @@ class VotingPlatformTest extends TestCase
         $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
         $participant = Participant::query()->with('presentation')->where('event_id', $event->id)->orderBy('presentation_order')->firstOrFail();
         $presentationId = $participant->presentation->id;
+
+        foreach (['admin.participants.edit', 'admin.participants.update', 'admin.participants.status', 'admin.participants.delete'] as $routeName) {
+            $this->assertTrue(Route::has($routeName), "La ruta {$routeName} debe estar registrada.");
+        }
+
+        $this->actingAs($admin)
+            ->get(route('admin.participants', $event))
+            ->assertOk()
+            ->assertSee(route('admin.participants.edit', $participant), false)
+            ->assertSee(route('admin.participants.status', $participant), false)
+            ->assertSee(route('admin.participants.delete', $participant), false);
 
         $this->actingAs($admin)
             ->get(route('admin.participants.edit', $participant))
