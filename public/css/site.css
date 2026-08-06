@@ -506,7 +506,8 @@ textarea.form-control { min-height: 105px; resize: vertical; }
 .admin-content { padding: 2rem 3.1rem; }
 .admin-content.is-compact { padding-top: 1.5rem; }
 .event-context-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: -1rem 0 1.4rem; padding: .7rem .9rem; border: 1px solid #c7d4fb; border-radius: .65rem; color: var(--primary); background: #edf2ff; font-size: .84rem; }
-.event-context-banner > div { display: flex; align-items: center; gap: .45rem; font-weight: 700; }
+.event-context-banner > div { display: flex; align-items: center; gap: .65rem; font-weight: 700; }
+.event-context-banner code { color: var(--primary-container); }
 .event-context-banner a { color: var(--primary-container); font-weight: 800; }
 .admin-content > .page-heading:first-child {
     min-height: 150px;
@@ -561,6 +562,16 @@ textarea.form-control { min-height: 105px; resize: vertical; }
 .preview-public .participant-card { margin: 0; }
 .issued-code { padding: 1rem; margin-bottom: 1rem; border: 1px solid #ffb961; border-radius: .65rem; color: #663e00; background: #ffddb8; }
 .issued-code strong { display: block; font-family: Montserrat, sans-serif; font-size: 1.15rem; }
+.issued-access { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1.5rem; padding: 1.2rem 1.4rem; margin-bottom: 1rem; border: 1px solid #ffb961; color: #663e00; background: #ffddb8; }
+.issued-access h2 { margin: .25rem 0; color: var(--primary); }
+.issued-access p { margin: .35rem 0 .8rem; }
+.issued-access-code { display: block; color: var(--primary); font-family: Montserrat, sans-serif; font-size: 1.5rem; letter-spacing: .08em; }
+.issued-access-qr { width: 180px; height: 180px; padding: .45rem; border-radius: .5rem; background: #fff; }
+.issued-access-note { display: block; margin-top: .6rem; }
+.juror-history { display: grid; gap: .35rem; min-width: 240px; }
+.juror-history > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 .5rem; }
+.juror-history small { grid-column: 1 / -1; color: var(--muted); font-size: .75rem; }
+.juror-editor-card { max-width: 920px; }
 .weight-layout { display: grid; grid-template-columns: minmax(250px, .75fr) minmax(0, 1.25fr); gap: 1.2rem; }
 .weight-card { padding: 1rem; }
 .weight-bar { height: .55rem; overflow: hidden; display: flex; border-radius: 999px; background: var(--surface-high); }
@@ -962,6 +973,8 @@ textarea.form-control { min-height: 105px; resize: vertical; }
     .segmented-code input { width: 2.7rem; height: 3.35rem; }
     .page-heading { display: grid; }
     .event-context-banner { align-items: flex-start; flex-direction: column; margin-top: 0; }
+    .issued-access { grid-template-columns: 1fr; }
+    .issued-access-qr { width: 150px; height: 150px; }
     .page-actions { width: 100%; }
     .page-actions .button { flex: 1; }
     .wizard-steps { overflow-x: auto; grid-template-columns: repeat(7, minmax(70px, 1fr)); padding-bottom: .5rem; }
