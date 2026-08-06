@@ -360,6 +360,13 @@ textarea.form-control { min-height: 105px; resize: vertical; }
 .criterion-icon { color: var(--primary-container); font-size: 1.25rem; }
 .criterion-weight { color: var(--muted); font-size: .73rem; font-weight: 700; }
 .criterion-description { color: var(--muted); font-size: .78rem; margin-bottom: .8rem; }
+.criterion-help { margin: .55rem 0 .85rem; border-top: 1px solid var(--outline); }
+.criterion-help summary { display: inline-flex; align-items: center; gap: .3rem; padding-top: .55rem; color: var(--primary-container); cursor: pointer; font-size: .78rem; font-weight: 700; list-style: none; }
+.criterion-help summary::-webkit-details-marker { display: none; }
+.criterion-help summary .material-symbols-outlined { font-size: 1rem; }
+.criterion-help-content { margin-top: .55rem; padding: .7rem .8rem; border-radius: .5rem; color: var(--text); background: var(--surface-low); font-size: .78rem; }
+.criterion-help-content strong { display: block; margin-bottom: .25rem; color: var(--primary); }
+.criterion-help-content p { margin: 0; white-space: pre-line; }
 .rating-scale { display: flex; align-items: center; justify-content: space-between; gap: .35rem; }
 .rating-scale input { position: absolute; opacity: 0; pointer-events: none; }
 .rating-scale label {
