@@ -41,6 +41,7 @@ Route::get('/admin/sin-permiso', [AccountController::class, 'denied'])->name('ad
 
 Route::middleware(['auth', 'role:Administrator,Operator'])->group(function () {
     Route::get('/admin', [AdminController::class, 'index'])->name('admin.index');
+    Route::get('/admin/proyectos', [AdminController::class, 'projects'])->name('admin.projects');
     Route::get('/admin/jurados', [AdminController::class, 'allJurors'])->name('admin.jurors.all');
     Route::get('/admin/resultados', [AdminController::class, 'allResults'])->name('admin.results.all');
     Route::post('/admin/salir', [AccountController::class, 'logout'])->name('admin.logout');
@@ -77,6 +78,8 @@ Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::post('/admin/participantes/{participant}/eliminar', [AdminController::class, 'deleteParticipant'])->name('admin.participants.delete');
     Route::get('/api/admin/jurados/buscar', [AdminController::class, 'searchJurors'])->name('admin.jurors.search');
     Route::post('/admin/jurados/agregar', [AdminController::class, 'addJuror'])->name('admin.jurors.add');
+    Route::get('/admin/jurados/{juror}/editar', [AdminController::class, 'editJuror'])->name('admin.jurors.edit');
+    Route::post('/admin/jurados/{juror}/editar', [AdminController::class, 'updateJuror'])->name('admin.jurors.update');
     Route::post('/admin/jurados/{juror}/regenerar', [AdminController::class, 'regenerateJuror'])->name('admin.jurors.regenerate');
     Route::post('/admin/jurados/{juror}/revocar', [AdminController::class, 'revokeJuror'])->name('admin.jurors.revoke');
     Route::post('/admin/eventos/{event}/votantes/generar-codigos', [AdminController::class, 'generateVoterCodes'])->name('admin.voters.generate');

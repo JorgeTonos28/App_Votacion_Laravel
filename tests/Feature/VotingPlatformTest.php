@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Mail\JurorAccessMail;
+use App\Models\Juror;
 use App\Models\Participant;
 use App\Models\User;
 use App\Models\Vote;
@@ -12,6 +14,7 @@ use App\Services\ResultService;
 use App\Services\VoteService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -33,7 +36,8 @@ class VotingPlatformTest extends TestCase
         $this->get('/e/BTP726')
             ->assertOk()
             ->assertSee('Plataforma de Votación')
-            ->assertSee('BTP726');
+            ->assertSee('BTP726')
+            ->assertSee('favicon.png');
 
         $this->post('/evento/acceder', ['event_code' => 'BTP726'])
             ->assertOk()
@@ -63,6 +67,66 @@ class VotingPlatformTest extends TestCase
             ->assertOk()
             ->assertSee('Eventos Activos')
             ->assertSee('Batalla de Prompts');
+    }
+
+    public function test_juror_access_is_emailed_and_can_be_opened_from_the_prefilled_link(): void
+    {
+        Mail::fake();
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        $this->actingAs($admin)->get(route('admin.jurors', $event))
+            ->assertOk()
+            ->assertSee($event->name)
+            ->assertSee($event->code)
+            ->assertDontSee('Estás trabajando dentro de un evento')
+            ->assertDontSee('Volver a Editar evento');
+        $this->actingAs($admin)->get(route('admin.projects'))->assertOk()->assertSee('Proyectos');
+
+        $response = $this->actingAs($admin)->post(route('admin.jurors.add'), [
+            'event_id' => $event->id,
+            'name' => 'Jurado de Prueba',
+            'title' => 'Evaluador QA',
+            'email' => 'jurado.qa@example.com',
+            'individual_weight' => 1.5,
+        ]);
+
+        $response->assertRedirect();
+        $issued = $response->getSession()->get('issuedJuror');
+        $this->assertNotEmpty($issued['code'] ?? null);
+        $this->assertStringContainsString('event=BTP726', $issued['accessUrl']);
+        $this->assertStringContainsString('code=', $issued['accessUrl']);
+        $this->assertStringStartsWith('data:image/png;base64,', $issued['qrDataUri']);
+        Mail::assertSent(JurorAccessMail::class);
+
+        $this->get($issued['accessUrl'])
+            ->assertOk()
+            ->assertSee('value="BTP726"', false)
+            ->assertSee('value="'.$issued['code'].'"', false);
+    }
+
+    public function test_global_juror_directory_deduplicates_history_and_edits_without_changing_weights(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $firstEvent = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $secondEvent = VotingEvent::query()->create(['code' => 'QA2026', 'name' => 'Evento QA']);
+        $jurorData = ['name' => 'Jurado Recurrente', 'title' => 'Mentor', 'email' => 'recurrente@example.com', 'code_hash' => 'not-used'];
+        $first = Juror::query()->create($jurorData + ['event_id' => $firstEvent->id, 'individual_weight' => 1.25]);
+        $second = Juror::query()->create($jurorData + ['event_id' => $secondEvent->id, 'individual_weight' => 2.5]);
+
+        $directory = $this->actingAs($admin)->get(route('admin.jurors.all'));
+        $directory->assertOk()->assertSee('2 evento(s)');
+        $this->assertSame(1, substr_count($directory->getContent(), 'Jurado Recurrente'));
+
+        $this->actingAs($admin)->post(route('admin.jurors.update', $first).'?global=1', [
+            'global' => 1,
+            'name' => 'Jurado Actualizado',
+            'title' => 'Directora',
+            'email' => 'actualizada@example.com',
+        ])->assertRedirect(route('admin.jurors.all'));
+
+        $this->assertDatabaseHas('jurors', ['id' => $first->id, 'name' => 'Jurado Actualizado', 'individual_weight' => 1.25]);
+        $this->assertDatabaseHas('jurors', ['id' => $second->id, 'name' => 'Jurado Actualizado', 'individual_weight' => 2.5]);
     }
 
     public function test_public_access_creates_a_reusable_device_voter_and_session(): void

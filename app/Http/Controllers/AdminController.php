@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\DomainException;
+use App\Mail\JurorAccessMail;
 use App\Models\AppSetting;
 use App\Models\AuditEntry;
 use App\Models\Criterion;
@@ -28,6 +29,7 @@ use App\Support\Domain;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminController extends Controller
@@ -43,19 +45,41 @@ class AdminController extends Controller
 
     public function index()
     {
-        $events = VotingEvent::query()->withCount(['participants', 'jurors'])->get()->map(function ($event) {
-            $event->votes_count = Vote::query()->where('event_id', $event->id)->where('status', '!=', 'Invalidated')->count();
-
-            return $event;
-        })->sortByDesc('starts_at')->values();
+        $events = $this->eventDirectory();
         $metrics = ['activeEvents' => $events->whereIn('status', ['Live', 'LobbyOpen', 'Paused'])->count(), 'upcomingEvents' => $events->where('status', 'Scheduled')->count(), 'finishedEvents' => $events->whereIn('status', ['Finished', 'Published'])->count(), 'totalVotes' => Vote::query()->where('status', '!=', 'Invalidated')->count(), 'activeJurors' => Juror::query()->where('status', 'Active')->count(), 'connectedUsers' => EventSession::query()->whereNull('revoked_at')->where('expires_at', '>', now())->count(), 'totalParticipants' => Participant::query()->count()];
 
         return view('admin.index', compact('events', 'metrics'));
     }
 
+    public function projects()
+    {
+        $events = $this->eventDirectory();
+
+        return view('admin.projects', compact('events'));
+    }
+
     public function allJurors()
     {
-        $jurors = Juror::query()->with('event')->orderBy('name')->get()->each(fn ($j) => $j->votes_count = Vote::query()->where('event_id', $j->event_id)->where('actor_id', $j->id)->where('status', '!=', 'Invalidated')->count());
+        $voteCounts = Vote::query()
+            ->where('role_type', 'Jury')
+            ->where('status', '!=', 'Invalidated')
+            ->selectRaw('actor_id, COUNT(*) AS votes_count')
+            ->groupBy('actor_id')
+            ->pluck('votes_count', 'actor_id');
+        $records = Juror::query()->with('event')->orderBy('name')->get();
+        $jurors = $records->groupBy(fn (Juror $juror) => $this->jurorIdentityKey($juror))
+            ->map(function ($history) use ($voteCounts) {
+                $representative = $history->sortByDesc(fn (Juror $juror) => (string) $juror->created_at)->first();
+                $representative->history = $history->sortByDesc(fn (Juror $juror) => (string) $juror->created_at)->values();
+                $representative->events_count = $history->count();
+                $representative->votes_count = $history->sum(fn (Juror $juror) => (int) $voteCounts->get($juror->id, 0));
+                $representative->is_active = $history->contains(fn (Juror $juror) => $juror->status === 'Active');
+                $representative->latest_access_at = $history->max('last_access_at');
+
+                return $representative;
+            })
+            ->sortBy('name')
+            ->values();
 
         return view('admin.all-jurors', compact('jurors'));
     }
@@ -304,7 +328,16 @@ class AdminController extends Controller
     public function searchJurors(Request $request)
     {
         $term = trim($request->query('query', ''));
-        $data = $term === '' || mb_strlen($term) < 2 ? [] : Juror::query()->where('name', 'like', "%{$term}%")->orderBy('name')->get(['name', 'title', 'email'])->unique(fn ($x) => $x->name.'|'.$x->title.'|'.$x->email)->take(8)->values()->map(fn ($x) => ['name' => $x->name, 'title' => $x->title, 'email' => $x->email])->all();
+        $data = $term === '' || mb_strlen($term) < 2 ? [] : Juror::query()
+            ->where('name', 'like', "%{$term}%")
+            ->orderByDesc('created_at')
+            ->get(['name', 'title', 'email', 'created_at'])
+            ->groupBy(fn (Juror $juror) => $this->jurorIdentityKey($juror))
+            ->map(fn ($history) => $history->first())
+            ->take(8)
+            ->values()
+            ->map(fn ($juror) => ['name' => $juror->name, 'title' => $juror->title, 'email' => $juror->email])
+            ->all();
 
         return $this->envelope($data);
     }
@@ -312,21 +345,33 @@ class AdminController extends Controller
     public function addJuror(Request $request)
     {
         $data = $request->validate(['event_id' => 'required|uuid|exists:events,id', 'name' => 'required|string|max:180', 'title' => 'nullable|string|max:180', 'email' => 'nullable|email|max:254', 'individual_weight' => 'required|numeric|min:.1|max:10']);
+        $event = VotingEvent::query()->findOrFail($data['event_id']);
         $code = Domain::jurorCode();
         $juror = Juror::query()->create(['event_id' => $data['event_id'], 'name' => trim($data['name']), 'title' => trim($data['title'] ?? '') ?: null, 'email' => trim($data['email'] ?? '') ?: null, 'individual_weight' => $data['individual_weight'], 'code_hash' => Domain::hashSecret($code), 'expires_at' => now()->addYear()]);
         $this->audit->write($juror->event_id, 'Administrator', (string) $request->user()->id, 'JUROR_CREATED', 'Juror', $juror->id, newValue: ['name' => $juror->name]);
+        $accessUrl = $this->jurorAccessUrl($event, $code);
+        $emailSent = $this->sendJurorAccess($juror, $event, $code, $accessUrl);
 
-        return back()->with('issuedJurorCode', "{$juror->name}: {$code}");
+        return back()
+            ->with('issuedJuror', $this->issuedJurorPayload($juror, $event, $code, $accessUrl, $emailSent))
+            ->with('issuedJurorCode', "{$juror->name}: {$code}")
+            ->with('success', $this->jurorIssuedMessage($emailSent));
     }
 
     public function regenerateJuror(Request $request, Juror $juror)
     {
+        $event = $juror->event;
         $code = Domain::jurorCode();
         $juror->update(['code_hash' => Domain::hashSecret($code), 'status' => 'Active', 'failed_attempts' => 0, 'locked_until' => null]);
         EventSession::query()->where('event_id', $juror->event_id)->where('actor_id', $juror->id)->whereNull('revoked_at')->update(['revoked_at' => now()]);
         $this->audit->write($juror->event_id, 'Administrator', (string) $request->user()->id, 'JUROR_CODE_REGENERATED', 'Juror', $juror->id);
+        $accessUrl = $this->jurorAccessUrl($event, $code);
+        $emailSent = $this->sendJurorAccess($juror, $event, $code, $accessUrl);
 
-        return back()->with('issuedJurorCode', "{$juror->name}: {$code}");
+        return back()
+            ->with('issuedJuror', $this->issuedJurorPayload($juror, $event, $code, $accessUrl, $emailSent))
+            ->with('issuedJurorCode', "{$juror->name}: {$code}")
+            ->with('success', $this->jurorIssuedMessage($emailSent, true));
     }
 
     public function revokeJuror(Request $request, Juror $juror)
@@ -336,6 +381,55 @@ class AdminController extends Controller
         $this->audit->write($juror->event_id, 'Administrator', (string) $request->user()->id, 'JUROR_CODE_REVOKED', 'Juror', $juror->id);
 
         return back();
+    }
+
+    public function editJuror(Request $request, Juror $juror)
+    {
+        $juror->load('event');
+        $event = $request->boolean('global') ? null : $juror->event;
+        $isGlobal = $event === null;
+
+        return view('admin.juror-edit', compact('event', 'juror', 'isGlobal'));
+    }
+
+    public function updateJuror(Request $request, Juror $juror)
+    {
+        $isGlobal = $request->boolean('global');
+        $rules = [
+            'global' => 'nullable|boolean',
+            'name' => 'required|string|max:180',
+            'title' => 'nullable|string|max:180',
+            'email' => 'nullable|email|max:254',
+            'individual_weight' => 'sometimes|required|numeric|min:.1|max:10',
+        ];
+        $data = $request->validate($rules);
+        $payload = [
+            'name' => trim($data['name']),
+            'title' => trim($data['title'] ?? '') ?: null,
+            'email' => trim($data['email'] ?? '') ?: null,
+        ];
+        if (array_key_exists('individual_weight', $data)) {
+            $payload['individual_weight'] = $data['individual_weight'];
+        }
+
+        if ($isGlobal) {
+            $records = $this->jurorRecordsForIdentity($juror)->get();
+            $previous = ['name' => $juror->name, 'title' => $juror->title, 'email' => $juror->email];
+            DB::transaction(function () use ($records, $payload, $request, $previous) {
+                foreach ($records as $record) {
+                    $record->update($payload);
+                    $this->audit->write($record->event_id, 'Administrator', (string) $request->user()->id, 'JUROR_UPDATED', 'Juror', $record->id, $previous, $record->only(array_keys($previous)));
+                }
+            });
+
+            return redirect()->route('admin.jurors.all')->with('success', 'La información del jurado fue actualizada en su historial.');
+        }
+
+        $previous = $juror->only(['name', 'title', 'email', 'individual_weight']);
+        $juror->update($payload);
+        $this->audit->write($juror->event_id, 'Administrator', (string) $request->user()->id, 'JUROR_UPDATED', 'Juror', $juror->id, $previous, $juror->only(array_keys($previous)));
+
+        return redirect()->route('admin.jurors', $juror->event_id)->with('success', 'La información del jurado fue actualizada.');
     }
 
     public function voters(VotingEvent $event)
@@ -548,6 +642,88 @@ class AdminController extends Controller
         $target = route('event.code', ['code' => Domain::normalizeCode($eventCode)]);
 
         return response($this->qr->png($target))->header('Content-Type', 'image/png');
+    }
+
+    private function eventDirectory()
+    {
+        return VotingEvent::query()->withCount(['participants', 'jurors'])->get()->map(function ($event) {
+            $event->votes_count = Vote::query()->where('event_id', $event->id)->where('status', '!=', 'Invalidated')->count();
+
+            return $event;
+        })->sortByDesc('starts_at')->values();
+    }
+
+    private function jurorIdentityKey(Juror $juror): string
+    {
+        $email = $this->normalizeJurorValue($juror->email);
+        if ($email !== '') {
+            return 'email:'.$email;
+        }
+
+        return 'name:'.$this->normalizeJurorValue($juror->name).'|title:'.$this->normalizeJurorValue($juror->title);
+    }
+
+    private function jurorRecordsForIdentity(Juror $juror)
+    {
+        $email = $this->normalizeJurorValue($juror->email);
+        if ($email !== '') {
+            return Juror::query()->whereRaw("LOWER(COALESCE(TRIM(email), '')) = ?", [$email]);
+        }
+
+        return Juror::query()
+            ->whereRaw("LOWER(COALESCE(TRIM(name), '')) = ?", [$this->normalizeJurorValue($juror->name)])
+            ->whereRaw("LOWER(COALESCE(TRIM(title), '')) = ?", [$this->normalizeJurorValue($juror->title)]);
+    }
+
+    private function normalizeJurorValue(?string $value): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/', ' ', $value ?? '')));
+    }
+
+    private function jurorAccessUrl(VotingEvent $event, string $code): string
+    {
+        return route('jury.access', ['event' => $event->code, 'code' => $code]);
+    }
+
+    private function sendJurorAccess(Juror $juror, VotingEvent $event, string $code, string $accessUrl): ?bool
+    {
+        if (! $juror->email) {
+            return null;
+        }
+
+        try {
+            Mail::to($juror->email)->send(new JurorAccessMail($juror, $event, $code, $accessUrl));
+
+            return true;
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return false;
+        }
+    }
+
+    private function issuedJurorPayload(Juror $juror, VotingEvent $event, string $code, string $accessUrl, ?bool $emailSent): array
+    {
+        return [
+            'name' => $juror->name,
+            'code' => $code,
+            'eventName' => $event->name,
+            'eventCode' => $event->code,
+            'accessUrl' => $accessUrl,
+            'qrDataUri' => 'data:image/png;base64,'.base64_encode($this->qr->png($accessUrl, 280)),
+            'emailSent' => $emailSent,
+        ];
+    }
+
+    private function jurorIssuedMessage(?bool $emailSent, bool $regenerated = false): string
+    {
+        $action = $regenerated ? 'regenerado' : 'creado';
+
+        return match ($emailSent) {
+            true => "Acceso {$action}. El código y el enlace fueron enviados al correo del jurado.",
+            false => "Acceso {$action}, pero no se pudo enviar el correo. Comparte el código desde esta pantalla.",
+            default => "Acceso {$action}. Comparte el código desde esta pantalla.",
+        };
     }
 
     private function validateEvent(Request $request, bool $creating): array

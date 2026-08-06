@@ -20,9 +20,10 @@ class JuryController extends Controller
 
     public function access(Request $request)
     {
-        $eventCode = $request->query('event');
+        $eventCode = $request->query('event', $request->query('eventCode'));
+        $jurorCode = $request->query('code', $request->query('jurorCode'));
 
-        return view('jury.access', compact('eventCode'));
+        return view('jury.access', compact('eventCode', 'jurorCode'));
     }
 
     public function validateCode(Request $request)
