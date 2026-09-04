@@ -59,7 +59,11 @@
 <p>Cada rúbrica debe sumar 100% internamente.</p>
 </div>
 </header>
-<div class="rubric-editor-grid">@foreach($groups as $group)@php $criteria=$group->criteria->where('enabled',true)->sortBy('sort_order')->values(); @endphp<article class="card rubric-editor-card">
+@if(!$locked)
+@foreach($groups as $group)<form id="rubric-import-{{ $group->id }}" action="{{ route('admin.voting.rubric.import',$event) }}" method="post" enctype="multipart/form-data">@csrf</form>@endforeach
+<form action="{{ route('admin.voting.rubric',$event) }}" method="post" data-rubrics-form>@csrf
+@endif
+<div class="rubric-editor-grid">@foreach($groups as $group)@php $criteria=$group->criteria->where('enabled',true)->sortBy('sort_order')->values(); $rubricIndex=$loop->index; @endphp<article class="card rubric-editor-card">
 <header class="panel-header">
 <div>
 <span class="badge badge-primary">{{ $group->name }}</span>
@@ -75,56 +79,56 @@
 <p>{{ $criterion->description }}</p>
 <div class="table-subtitle">Escala {{ number_format($criterion->scale_min) }}–{{ number_format($criterion->scale_max) }}</div>
 </article>@endforeach</div>
-@else<div class="rubric-import"><form action="{{ route('admin.voting.rubric.import',$event) }}" method="post" enctype="multipart/form-data">@csrf<input type="hidden" name="voting_group_id" value="{{ $group->id }}"><div><strong>Importar criterios</strong><x-csv-hint :columns="['nombre', 'descripcion', 'peso', 'escala_minima', 'escala_maxima', 'etiqueta_minima', 'etiqueta_maxima', 'comentario', 'respuesta_obligatoria', 'ayuda_para_evaluar']" :required="['nombre']" note="La importación reemplaza esta rúbrica. Si omites peso se reparte el porcentaje disponible; comentario acepta Hidden, Optional o Required y respuesta_obligatoria acepta Sí o No." /></div><input class="form-control" type="file" name="csv" accept=".csv,text/csv" required><button class="button button-secondary" type="submit"><span class="material-symbols-outlined">upload_file</span> Importar CSV</button></form></div><form action="{{ route('admin.voting.rubric',$event) }}" method="post" data-rubric-editor>@csrf<input type="hidden" name="voting_group_id" value="{{ $group->id }}">
+@else<div class="rubric-import"><div class="rubric-import-controls"><input form="rubric-import-{{ $group->id }}" type="hidden" name="voting_group_id" value="{{ $group->id }}"><div><strong>Importar criterios</strong><x-csv-hint :columns="['nombre', 'descripcion', 'peso', 'escala_minima', 'escala_maxima', 'etiqueta_minima', 'etiqueta_maxima', 'comentario', 'respuesta_obligatoria', 'ayuda_para_evaluar']" :required="['nombre']" note="La importación reemplaza esta rúbrica. Si omites peso se reparte el porcentaje disponible; comentario acepta Hidden, Optional o Required y respuesta_obligatoria acepta Sí o No." /></div><input form="rubric-import-{{ $group->id }}" class="form-control" type="file" name="csv" accept=".csv,text/csv" required><button form="rubric-import-{{ $group->id }}" class="button button-secondary" type="submit"><span class="material-symbols-outlined">upload_file</span> Importar CSV</button></div></div><div data-rubric-editor><input type="hidden" name="rubrics[{{ $rubricIndex }}][voting_group_id]" value="{{ $group->id }}">
 <div class="criterion-editor-list" data-criterion-list>@foreach($criteria as $i=>$criterion)<fieldset class="criterion-editor" data-criterion-row>
 <legend>Criterio <span data-criterion-number>{{ $i+1 }}</span>
 </legend>
-<input type="hidden" name="criteria[{{ $i }}][id]" value="{{ $criterion->id }}">
+<input type="hidden" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][id]" value="{{ $criterion->id }}">
 <div class="form-group">
 <label>Nombre</label>
-<input class="form-control" name="criteria[{{ $i }}][name]" maxlength="180" value="{{ $criterion->name }}" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][name]" maxlength="180" value="{{ $criterion->name }}" required>
 </div>
 <div class="form-group">
 <label>Descripción</label>
-<textarea class="form-control" name="criteria[{{ $i }}][description]" maxlength="1000">{{ $criterion->description }}</textarea>
+<textarea class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][description]" maxlength="1000">{{ $criterion->description }}</textarea>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Peso (%)</label>
-<input class="form-control" name="criteria[{{ $i }}][weight_percent]" type="number" min=".01" max="100" step=".01" value="{{ $criterion->weight*100 }}" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][weight_percent]" type="number" min=".01" max="100" step=".01" value="{{ $criterion->weight*100 }}" required>
 </div>
 <div class="form-group">
 <label>Escala mínima</label>
-<input class="form-control" name="criteria[{{ $i }}][scale_min]" type="number" min="0" max="100" step=".01" value="{{ $criterion->scale_min }}" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][scale_min]" type="number" min="0" max="100" step=".01" value="{{ $criterion->scale_min }}" required>
 </div>
 <div class="form-group">
 <label>Escala máxima</label>
-<input class="form-control" name="criteria[{{ $i }}][scale_max]" type="number" min=".01" max="100" step=".01" value="{{ $criterion->scale_max }}" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][scale_max]" type="number" min=".01" max="100" step=".01" value="{{ $criterion->scale_max }}" required>
 </div>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Etiqueta mínima</label>
-<input class="form-control" name="criteria[{{ $i }}][minimum_label]" maxlength="80" value="{{ $criterion->minimum_label }}">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][minimum_label]" maxlength="80" value="{{ $criterion->minimum_label }}">
 </div>
 <div class="form-group">
 <label>Etiqueta máxima</label>
-<input class="form-control" name="criteria[{{ $i }}][maximum_label]" maxlength="80" value="{{ $criterion->maximum_label }}">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][maximum_label]" maxlength="80" value="{{ $criterion->maximum_label }}">
 </div>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Comentario</label>
-<select class="form-control" name="criteria[{{ $i }}][comment_mode]">@foreach(\App\Support\Domain::COMMENT_MODES as $mode)<option value="{{ $mode }}" @selected($criterion->comment_mode===$mode)>{{ $mode }}</option>@endforeach</select>
+<select class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][comment_mode]">@foreach(\App\Support\Domain::COMMENT_MODES as $mode)<option value="{{ $mode }}" @selected($criterion->comment_mode===$mode)>{{ $mode }}</option>@endforeach</select>
 </div>
 <label class="check-row">
-<input type="checkbox" name="criteria[{{ $i }}][required]" value="1" @checked($criterion->required)>
+<input type="checkbox" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][required]" value="1" @checked($criterion->required)>
 <span>Respuesta obligatoria</span>
 </label>
 </div>
 <div class="form-group">
 <label>Ayuda para evaluar</label>
-<input class="form-control" name="criteria[{{ $i }}][help_text]" maxlength="500" value="{{ $criterion->help_text }}">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][{{ $i }}][help_text]" maxlength="500" value="{{ $criterion->help_text }}">
 </div>
 <button class="text-button danger-text" type="button" data-remove-criterion>
 <span class="material-symbols-outlined">delete</span> Quitar criterio</button>
@@ -136,54 +140,54 @@
 </legend>
 <div class="form-group">
 <label>Nombre</label>
-<input class="form-control" name="criteria[__index__][name]" maxlength="180" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][name]" maxlength="180" required>
 </div>
 <div class="form-group">
 <label>Descripción</label>
-<textarea class="form-control" name="criteria[__index__][description]" maxlength="1000">
+<textarea class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][description]" maxlength="1000">
 </textarea>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Peso (%)</label>
-<input class="form-control" name="criteria[__index__][weight_percent]" type="number" min=".01" max="100" step=".01" value="1" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][weight_percent]" type="number" min=".01" max="100" step=".01" value="1" required>
 </div>
 <div class="form-group">
 <label>Escala mínima</label>
-<input class="form-control" name="criteria[__index__][scale_min]" type="number" min="0" max="100" step=".01" value="1" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][scale_min]" type="number" min="0" max="100" step=".01" value="1" required>
 </div>
 <div class="form-group">
 <label>Escala máxima</label>
-<input class="form-control" name="criteria[__index__][scale_max]" type="number" min=".01" max="100" step=".01" value="5" required>
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][scale_max]" type="number" min=".01" max="100" step=".01" value="5" required>
 </div>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Etiqueta mínima</label>
-<input class="form-control" name="criteria[__index__][minimum_label]" value="Deficiente">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][minimum_label]" value="Deficiente">
 </div>
 <div class="form-group">
 <label>Etiqueta máxima</label>
-<input class="form-control" name="criteria[__index__][maximum_label]" value="Excelente">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][maximum_label]" value="Excelente">
 </div>
 </div>
 <div class="form-grid compact-grid">
 <div class="form-group">
 <label>Comentario</label>
-<select class="form-control" name="criteria[__index__][comment_mode]">
+<select class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][comment_mode]">
 <option>Hidden</option>
 <option>Optional</option>
 <option>Required</option>
 </select>
 </div>
 <label class="check-row">
-<input type="checkbox" name="criteria[__index__][required]" value="1" checked>
+<input type="checkbox" name="rubrics[{{ $rubricIndex }}][criteria][__index__][required]" value="1" checked>
 <span>Respuesta obligatoria</span>
 </label>
 </div>
 <div class="form-group">
 <label>Ayuda para evaluar</label>
-<input class="form-control" name="criteria[__index__][help_text]" maxlength="500">
+<input class="form-control" name="rubrics[{{ $rubricIndex }}][criteria][__index__][help_text]" maxlength="500">
 </div>
 <button class="text-button danger-text" type="button" data-remove-criterion>
 <span class="material-symbols-outlined">delete</span> Quitar criterio</button>
@@ -192,8 +196,10 @@
 <div class="page-actions rubric-actions">
 <button class="button button-secondary" type="button" data-add-criterion>
 <span class="material-symbols-outlined">add</span> Agregar criterio</button>
-<button class="button" type="submit">
-<span class="material-symbols-outlined">save</span> Guardar rúbrica</button>
 </div>
-</form>@endif</article>@endforeach</div>
+</div>@endif</article>@endforeach</div>
+@if(!$locked)<div class="rubric-save-all">
+<div><strong>Guardar todos los cambios</strong><span>Jurado y Público se validarán y guardarán en una sola operación.</span></div>
+<button class="button" type="submit"><span class="material-symbols-outlined">save</span> Guardar todas las rúbricas</button>
+</div></form>@endif
 </section>@endsection

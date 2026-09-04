@@ -25,11 +25,11 @@
     </section>
 
     <section class="projection-center">
-        <div>
+        <div class="projection-participant">
             <span class="badge badge-live">Ronda {{ $state['roundNumber'] }} · {{ $state['eventStatus'] === 'Paused' ? 'Evento en pausa' : ($state['presentationStatus'] === 'VotingOpen' ? 'Votación abierta' : ($state['presentationStatus'] === 'OnStage' ? 'Equipo activo en escenario' : 'En espera')) }}</span>
             <h1>{{ $state['participantName'] ?: $event->name }}</h1>
             <h2>{{ $state['projectTitle'] ?: 'La próxima presentación comenzará en breve' }}</h2>
-            @if($state['presentationId'])<x-participant-details :participant="$state" dark />@endif
+            @if($state['presentationId'])<x-participant-details :participant="$state" dark expanded />@endif
         </div>
         <div class="projection-timer">
             <small>Tiempo restante</small>

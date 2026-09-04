@@ -358,6 +358,9 @@ class VotingPlatformTest extends TestCase
 
         $this->get(route('projection.live', $event->code))
             ->assertOk()
+            ->assertSee('projection-participant', false)
+            ->assertSee('Descripción del proyecto')
+            ->assertSee('Integrantes')
             ->assertSee('Ada Lovelace')
             ->assertSee('Linus Torvalds')
             ->assertSee('Tecnología educativa')
@@ -369,6 +372,51 @@ class VotingPlatformTest extends TestCase
             ->assertSee('Ada Lovelace')
             ->assertSee('Linus Torvalds')
             ->assertSee('Tecnología educativa');
+    }
+
+    public function test_admin_saves_jury_and_public_rubrics_together(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with('groups.criteria')->where('code', 'BTP726')->firstOrFail();
+        $event->update(['status' => 'Draft']);
+
+        $page = $this->actingAs($admin)->get(route('admin.voting', $event));
+        $page->assertOk()
+            ->assertSee('data-rubrics-form', false)
+            ->assertSee('Guardar todas las rúbricas')
+            ->assertDontSee('> Guardar rúbrica</button>', false);
+
+        $rubrics = $event->groups->values()->map(function ($group, $groupIndex) {
+            return [
+                'voting_group_id' => $group->id,
+                'criteria' => $group->criteria->values()->map(function ($criterion, $criterionIndex) use ($groupIndex) {
+                    return [
+                        'id' => $criterion->id,
+                        'name' => $criterionIndex === 0 ? 'Criterio actualizado '.($groupIndex + 1) : $criterion->name,
+                        'description' => $criterion->description,
+                        'weight_percent' => $criterion->weight * 100,
+                        'scale_min' => $criterion->scale_min,
+                        'scale_max' => $criterion->scale_max,
+                        'minimum_label' => $criterion->minimum_label,
+                        'maximum_label' => $criterion->maximum_label,
+                        'required' => $criterion->required ? 1 : 0,
+                        'comment_mode' => $criterion->comment_mode,
+                        'help_text' => $criterion->help_text,
+                    ];
+                })->all(),
+            ];
+        })->all();
+
+        $this->actingAs($admin)->post(route('admin.voting.rubric', $event), ['rubrics' => $rubrics])
+            ->assertRedirect()
+            ->assertSessionHas('success', 'Todas las rúbricas se guardaron correctamente.');
+
+        foreach ($event->groups->values() as $groupIndex => $group) {
+            $this->assertDatabaseHas('criteria', [
+                'voting_group_id' => $group->id,
+                'name' => 'Criterio actualizado '.($groupIndex + 1),
+            ]);
+        }
     }
 
     public function test_admin_can_import_complete_rubrics_and_see_csv_hints(): void

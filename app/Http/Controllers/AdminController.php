@@ -533,26 +533,88 @@ class AdminController extends Controller
     {
         if ($this->configurationLocked($event)) {
             return back()->with('error', 'La rúbrica queda bloqueada cuando el evento inicia.');
-        }$data = $request->validate(['voting_group_id' => 'required|uuid', 'criteria' => 'required|array|min:1', 'criteria.*.id' => 'nullable|uuid', 'criteria.*.name' => 'required|string|max:180', 'criteria.*.description' => 'nullable|string|max:1000', 'criteria.*.weight_percent' => 'required|numeric|min:.01|max:100', 'criteria.*.scale_min' => 'required|numeric|min:0|max:100', 'criteria.*.scale_max' => 'required|numeric|min:.01|max:100', 'criteria.*.minimum_label' => 'nullable|string|max:80', 'criteria.*.maximum_label' => 'nullable|string|max:80', 'criteria.*.required' => 'nullable|boolean', 'criteria.*.comment_mode' => 'required|in:'.implode(',', Domain::COMMENT_MODES), 'criteria.*.help_text' => 'nullable|string|max:500']);
-        $group = VotingGroup::query()->with('criteria')->whereKey($data['voting_group_id'])->where('event_id', $event->id)->first();
-        if (! $group) {
-            return back()->with('error', 'No encontramos la audiencia de evaluación.');
-        }if (abs(collect($data['criteria'])->sum('weight_percent') - 100) > .001) {
-            return back()->with('error', 'Los pesos de los criterios deben sumar 100%.');
-        }$names = collect($data['criteria'])->map(fn ($c) => mb_strtolower(trim($c['name'])));
-        if ($names->duplicates()->isNotEmpty()) {
-            return back()->with('error', 'No repitas nombres de criterios dentro de la misma rúbrica.');
-        }DB::transaction(function () use ($data, $group, $event, $request) {
-            $submitted = collect($data['criteria'])->pluck('id')->filter();
-            Criterion::query()->where('voting_group_id', $group->id)->whereNotIn('id', $submitted)->delete();
-            foreach ($data['criteria'] as $i => $input) {
-                if ($input['scale_max'] <= $input['scale_min']) {
-                    throw new DomainException('INVALID_RUBRIC', 'Cada criterio necesita una escala válida.');
-                }Criterion::query()->updateOrCreate(['id' => $input['id'] ?? Domain::uuid()], ['event_id' => $event->id, 'voting_group_id' => $group->id, 'name' => trim($input['name']), 'description' => trim($input['description'] ?? '') ?: null, 'weight' => $input['weight_percent'] / 100, 'scale_min' => $input['scale_min'], 'scale_max' => $input['scale_max'], 'minimum_label' => trim($input['minimum_label'] ?? '') ?: null, 'maximum_label' => trim($input['maximum_label'] ?? '') ?: null, 'required' => (bool) ($input['required'] ?? false), 'comment_mode' => $input['comment_mode'], 'help_text' => trim($input['help_text'] ?? '') ?: null, 'sort_order' => $i + 1, 'enabled' => true]);
-            }$this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRIC_UPDATED', 'VotingGroup', $group->id, newValue: ['group' => $group->name, 'criteria' => count($data['criteria'])]);
+        }
+
+        $data = $request->validate([
+            'rubrics' => 'required|array|min:1',
+            'rubrics.*.voting_group_id' => 'required|uuid',
+            'rubrics.*.criteria' => 'required|array|min:1',
+            'rubrics.*.criteria.*.id' => 'nullable|uuid',
+            'rubrics.*.criteria.*.name' => 'required|string|max:180',
+            'rubrics.*.criteria.*.description' => 'nullable|string|max:1000',
+            'rubrics.*.criteria.*.weight_percent' => 'required|numeric|min:.01|max:100',
+            'rubrics.*.criteria.*.scale_min' => 'required|numeric|min:0|max:100',
+            'rubrics.*.criteria.*.scale_max' => 'required|numeric|min:.01|max:100',
+            'rubrics.*.criteria.*.minimum_label' => 'nullable|string|max:80',
+            'rubrics.*.criteria.*.maximum_label' => 'nullable|string|max:80',
+            'rubrics.*.criteria.*.required' => 'nullable|boolean',
+            'rubrics.*.criteria.*.comment_mode' => 'required|in:'.implode(',', Domain::COMMENT_MODES),
+            'rubrics.*.criteria.*.help_text' => 'nullable|string|max:500',
+        ]);
+
+        $groups = VotingGroup::query()->where('event_id', $event->id)->get()->keyBy('id');
+        $submittedGroupIds = collect($data['rubrics'])->pluck('voting_group_id');
+        if ($submittedGroupIds->duplicates()->isNotEmpty() || $submittedGroupIds->sort()->values()->all() !== $groups->keys()->sort()->values()->all()) {
+            return back()->withInput()->with('error', 'Debes guardar juntas todas las rúbricas del evento.');
+        }
+
+        foreach ($data['rubrics'] as $rubric) {
+            $group = $groups->get($rubric['voting_group_id']);
+            if (abs(collect($rubric['criteria'])->sum('weight_percent') - 100) > .001) {
+                return back()->withInput()->with('error', "Los pesos de la rúbrica de {$group->name} deben sumar 100%.");
+            }
+
+            $names = collect($rubric['criteria'])->map(fn ($criterion) => mb_strtolower(trim($criterion['name'])));
+            if ($names->duplicates()->isNotEmpty()) {
+                return back()->withInput()->with('error', "No repitas nombres de criterios en la rúbrica de {$group->name}.");
+            }
+
+            if (collect($rubric['criteria'])->contains(fn ($criterion) => $criterion['scale_max'] <= $criterion['scale_min'])) {
+                return back()->withInput()->with('error', "Cada criterio de la rúbrica de {$group->name} necesita una escala válida.");
+            }
+
+            $knownCriterionIds = Criterion::query()->where('voting_group_id', $group->id)->pluck('id');
+            $foreignCriterionIds = collect($rubric['criteria'])->pluck('id')->filter()->diff($knownCriterionIds);
+            if ($foreignCriterionIds->isNotEmpty()) {
+                return back()->withInput()->with('error', 'Uno de los criterios enviados no pertenece a su rúbrica.');
+            }
+        }
+
+        DB::transaction(function () use ($data, $groups, $event, $request) {
+            $summary = [];
+            foreach ($data['rubrics'] as $rubric) {
+                $group = $groups->get($rubric['voting_group_id']);
+                $submitted = collect($rubric['criteria'])->pluck('id')->filter();
+                Criterion::query()->where('voting_group_id', $group->id)->whereNotIn('id', $submitted)->delete();
+
+                foreach ($rubric['criteria'] as $index => $input) {
+                    Criterion::query()->updateOrCreate(
+                        ['id' => $input['id'] ?? Domain::uuid()],
+                        [
+                            'event_id' => $event->id,
+                            'voting_group_id' => $group->id,
+                            'name' => trim($input['name']),
+                            'description' => trim($input['description'] ?? '') ?: null,
+                            'weight' => $input['weight_percent'] / 100,
+                            'scale_min' => $input['scale_min'],
+                            'scale_max' => $input['scale_max'],
+                            'minimum_label' => trim($input['minimum_label'] ?? '') ?: null,
+                            'maximum_label' => trim($input['maximum_label'] ?? '') ?: null,
+                            'required' => (bool) ($input['required'] ?? false),
+                            'comment_mode' => $input['comment_mode'],
+                            'help_text' => trim($input['help_text'] ?? '') ?: null,
+                            'sort_order' => $index + 1,
+                            'enabled' => true,
+                        ]
+                    );
+                }
+                $summary[] = ['group' => $group->name, 'criteria' => count($rubric['criteria'])];
+            }
+
+            $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRICS_UPDATED', 'VotingEvent', $event->id, newValue: ['rubrics' => $summary]);
         });
 
-        return back()->with('success', "Rúbrica de {$group->name} guardada.");
+        return back()->with('success', 'Todas las rúbricas se guardaron correctamente.');
     }
 
     public function importRubric(Request $request, VotingEvent $event)
