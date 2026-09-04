@@ -101,16 +101,16 @@ class DatabaseSeeder extends Seeder
         }
 
         $participants = [
-            ['Equipo Alpha', 'Generador de Mundos', 'Plataforma de creación procedural de entornos virtuales mediante modelos de lenguaje avanzados.'],
-            ['EcoSolutions', 'Sistema Inteligente de Reciclaje Urbano', 'Clasificación y trazabilidad de residuos con apoyo de IA.'],
-            ['BioTrack AI', 'Monitoreo preventivo de salud', 'Asistente para identificar señales tempranas y orientar hábitos saludables.'],
-            ['Quantum Mesh', 'Redes de baja latencia para IoT', 'Orquestación inteligente de dispositivos para ciudades conectadas.'],
-            ['AgriAI', 'Cultivos más eficientes', 'Recomendaciones de riego y nutrición basadas en datos locales.'],
+            ['Equipo Alpha', 'Generador de Mundos', 'Plataforma de creación procedural de entornos virtuales mediante modelos de lenguaje avanzados.', ['Ana Pérez', 'Miguel Santos', 'Laura Gómez']],
+            ['EcoSolutions', 'Sistema Inteligente de Reciclaje Urbano', 'Clasificación y trazabilidad de residuos con apoyo de IA.', ['Carlos Díaz', 'Elena Ruiz']],
+            ['BioTrack AI', 'Monitoreo preventivo de salud', 'Asistente para identificar señales tempranas y orientar hábitos saludables.', ['María Torres', 'José Vargas', 'Camila León']],
+            ['Quantum Mesh', 'Redes de baja latencia para IoT', 'Orquestación inteligente de dispositivos para ciudades conectadas.', ['Luis Peña', 'Andrea Cruz']],
+            ['AgriAI', 'Cultivos más eficientes', 'Recomendaciones de riego y nutrición basadas en datos locales.', ['Sofía Méndez', 'Daniel Rojas', 'Pablo Núñez']],
         ];
-        foreach ($participants as $index => [$name, $title, $description]) {
+        foreach ($participants as $index => [$name, $title, $description, $members]) {
             $participant = Participant::query()->create([
                 'event_id' => $event->id, 'number' => $index + 1, 'name' => $name,
-                'project_title' => $title, 'description' => $description,
+                'project_title' => $title, 'description' => $description, 'members' => Participant::serializeMemberNames($members),
                 'presentation_order' => $index + 1, 'area' => 'Innovación tecnológica',
             ]);
             Presentation::query()->create([

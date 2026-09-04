@@ -198,13 +198,13 @@ class AdminController extends Controller
 
     public function addParticipant(Request $request)
     {
-        $data = $request->validate(['event_id' => 'required|uuid|exists:events,id', 'name' => 'required|string|max:180', 'project_title' => 'nullable|string|max:240', 'members' => 'nullable|string|max:1000', 'area' => 'nullable|string|max:160', 'description' => 'nullable|string|max:3000']);
+        $data = $request->validate(['event_id' => 'required|uuid|exists:events,id', 'name' => 'required|string|max:180', 'project_title' => 'nullable|string|max:240', 'members' => 'nullable|array|max:30', 'members.*' => 'nullable|string|max:180', 'area' => 'nullable|string|max:160', 'description' => 'nullable|string|max:3000']);
         if (Presentation::query()->where('event_id', $data['event_id'])->where('status', '!=', 'Pending')->exists()) {
             throw new DomainException('CONFIGURATION_LOCKED', 'No puedes agregar participantes después de iniciar el evento.');
         }
         $number = (int) Participant::query()->where('event_id', $data['event_id'])->max('number') + 1;
         DB::transaction(function () use ($data, $number, $request) {
-            $p = Participant::query()->create(['event_id' => $data['event_id'], 'number' => $number, 'presentation_order' => $number, 'name' => trim($data['name']), 'project_title' => trim($data['project_title'] ?? '') ?: null, 'members' => trim($data['members'] ?? '') ?: null, 'area' => trim($data['area'] ?? '') ?: null, 'description' => trim($data['description'] ?? '') ?: null]);
+            $p = Participant::query()->create(['event_id' => $data['event_id'], 'number' => $number, 'presentation_order' => $number, 'name' => trim($data['name']), 'project_title' => trim($data['project_title'] ?? '') ?: null, 'members' => Participant::serializeMemberNames($data['members'] ?? []), 'area' => trim($data['area'] ?? '') ?: null, 'description' => trim($data['description'] ?? '') ?: null]);
             Presentation::query()->create(['event_id' => $data['event_id'], 'participant_id' => $p->id, 'sequence' => $number]);
             $this->audit->write($data['event_id'], 'Administrator', (string) $request->user()->id, 'PARTICIPANT_CREATED', 'Participant', $p->id, newValue: ['name' => $p->name]);
         });
@@ -225,7 +225,7 @@ class AdminController extends Controller
             if (! trim($c[0] ?? '')) {
                 continue;
             }$order++;
-            $p = Participant::query()->create(['event_id' => $event->id, 'number' => $order, 'presentation_order' => $order, 'name' => trim($c[0]), 'project_title' => trim($c[1] ?? '') ?: null, 'members' => trim($c[2] ?? '') ?: null, 'area' => trim($c[3] ?? '') ?: null]);
+            $p = Participant::query()->create(['event_id' => $event->id, 'number' => $order, 'presentation_order' => $order, 'name' => trim($c[0]), 'project_title' => trim($c[1] ?? '') ?: null, 'members' => Participant::serializeMemberNames($c[2] ?? null), 'area' => trim($c[3] ?? '') ?: null, 'description' => trim($c[4] ?? '') ?: null]);
             Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'sequence' => $order]);
         }
 
@@ -245,13 +245,15 @@ class AdminController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:180',
             'project_title' => 'nullable|string|max:240',
-            'members' => 'nullable|string|max:1000',
+            'members' => 'nullable|array|max:30',
+            'members.*' => 'nullable|string|max:180',
             'area' => 'nullable|string|max:160',
             'description' => 'nullable|string|max:3000',
         ]);
         $previous = $participant->only(['name', 'project_title', 'members', 'area', 'description']);
         $payload = collect($data)->map(fn ($value) => is_string($value) ? (trim($value) ?: null) : $value)->all();
         $payload['name'] = trim($data['name']);
+        $payload['members'] = Participant::serializeMemberNames($data['members'] ?? []);
         $participant->update($payload);
         $this->audit->write($participant->event_id, 'Administrator', (string) $request->user()->id, 'PARTICIPANT_UPDATED', 'Participant', $participant->id, $previous, $participant->only(array_keys($previous)));
 

@@ -3,7 +3,7 @@
 @section('title', 'Proyección en vivo')
 
 @php
-    $fingerprint = implode('|', [$state['eventStatus'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'True' : 'False', $state['timerIsPaused'] ? 'True' : 'False']);
+    $fingerprint = implode('|', [$state['eventStatus'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'True' : 'False', $state['timerIsPaused'] ? 'True' : 'False', $state['participantFingerprint']]);
     $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
 @endphp
 
@@ -29,6 +29,7 @@
             <span class="badge badge-live">{{ $state['eventStatus'] === 'Paused' ? 'Evento en pausa' : ($state['presentationStatus'] === 'VotingOpen' ? 'Votación abierta' : ($state['presentationStatus'] === 'OnStage' ? 'Equipo activo en escenario' : 'En espera')) }}</span>
             <h1>{{ $state['participantName'] ?: $event->name }}</h1>
             <h2>{{ $state['projectTitle'] ?: 'La próxima presentación comenzará en breve' }}</h2>
+            @if($state['presentationId'])<x-participant-details :participant="$state" dark />@endif
         </div>
         <div class="projection-timer">
             <small>Tiempo restante</small>

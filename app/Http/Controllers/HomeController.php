@@ -15,7 +15,7 @@ class HomeController extends Controller
 {
     public function __construct(private readonly AccessService $access, private readonly EventSessionService $sessions) {}
 
-    public function index(?string $code = null)
+    public function index(Request $request, ?string $code = null)
     {
         $model = ['eventCode' => $code ?? '', 'requiresIdentity' => false, 'requiresAccessCredential' => false, 'accessMode' => null];
         if ($code) {
@@ -26,7 +26,12 @@ class HomeController extends Controller
             }
         }
 
-        return view('home.index', compact('model'));
+        $response = response()->view('home.index', compact('model'));
+        if (! $request->cookie('innovamente_device')) {
+            $response->cookie('innovamente_device', Str::uuid()->toString(), 525600, null, null, $request->isSecure(), true, false, 'Lax');
+        }
+
+        return $response;
     }
 
     public function access(Request $request)

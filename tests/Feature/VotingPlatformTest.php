@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Vote;
 use App\Models\Voter;
 use App\Models\VotingEvent;
+use App\Services\EventQueryService;
 use App\Services\LiveControlService;
 use App\Services\ResultService;
 use App\Services\VoteService;
@@ -149,6 +150,28 @@ class VotingPlatformTest extends TestCase
         $this->assertDatabaseHas('voters', ['display_name' => 'Visitante QA Actualizado']);
     }
 
+    public function test_access_limits_do_not_block_valid_jurors_or_distinct_audience_devices_on_the_same_network(): void
+    {
+        foreach (range(1, 7) as $attempt) {
+            $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.25'])
+                ->post('/jurado/validar', [
+                    'event_code' => 'BTP726',
+                    'juror_code' => 'J7K4-PQ9M',
+                ])
+                ->assertOk();
+        }
+
+        foreach (range(1, 10) as $device) {
+            $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.25'])
+                ->withCookie('innovamente_device', 'shared-network-device-'.$device)
+                ->post('/evento/acceder', [
+                    'event_code' => 'BTP726',
+                    'display_name' => 'Asistente '.$device,
+                ])
+                ->assertRedirect('/evento');
+        }
+    }
+
     public function test_live_control_vote_idempotency_and_weighted_results(): void
     {
         $event = VotingEvent::query()->with(['presentations', 'jurors', 'groups.criteria'])->where('code', 'BTP726')->firstOrFail();
@@ -248,11 +271,12 @@ class VotingPlatformTest extends TestCase
         $this->actingAs($admin)->post(route('admin.participants.update', $participant), [
             'name' => 'Equipo QA Renovado',
             'project_title' => 'Proyecto QA',
-            'members' => 'Ada, Linus',
+            'members' => ['Ada Lovelace', 'Linus Torvalds', 'Ada Lovelace', ''],
             'area' => 'Tecnología',
             'description' => 'Descripción actualizada para pruebas.',
         ])->assertRedirect(route('admin.participants', $event));
         $this->assertDatabaseHas('participants', ['id' => $participant->id, 'name' => 'Equipo QA Renovado', 'project_title' => 'Proyecto QA']);
+        $this->assertSame(['Ada Lovelace', 'Linus Torvalds'], $participant->fresh()->member_names);
 
         $this->actingAs($admin)->post(route('admin.participants.status', $participant), [
             'status' => 'Disqualified',
@@ -296,6 +320,41 @@ class VotingPlatformTest extends TestCase
             ->assertOk()
             ->assertSee('Ver resultados')
             ->assertSee(route('projection.ranking', $event->code), false);
+    }
+
+    public function test_live_panels_and_ballot_state_include_complete_team_details(): void
+    {
+        $event = VotingEvent::query()->with('presentations.participant')->where('code', 'BTP726')->firstOrFail();
+        $presentation = $event->presentations->first();
+        $participant = $presentation->participant;
+        $participant->update([
+            'members' => Participant::serializeMemberNames(['Ada Lovelace', 'Linus Torvalds']),
+            'area' => 'Tecnología educativa',
+            'description' => 'Una solución para aprender con inteligencia artificial.',
+        ]);
+
+        $control = app(LiveControlService::class);
+        $control->operate($event->id, 'start', (string) Str::uuid());
+        $control->operate($event->id, 'presentation', (string) Str::uuid(), $participant->id);
+
+        $state = app(EventQueryService::class)->liveStateByCode($event->code);
+        $this->assertSame(['Ada Lovelace', 'Linus Torvalds'], $state['participantMembers']);
+        $this->assertSame('Tecnología educativa', $state['participantArea']);
+        $this->assertSame('Una solución para aprender con inteligencia artificial.', $state['participantDescription']);
+
+        $this->get(route('projection.live', $event->code))
+            ->assertOk()
+            ->assertSee('Ada Lovelace')
+            ->assertSee('Linus Torvalds')
+            ->assertSee('Tecnología educativa')
+            ->assertSee('Una solución para aprender con inteligencia artificial.');
+
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $this->actingAs($admin)->get(route('admin.live', $event))
+            ->assertOk()
+            ->assertSee('Ada Lovelace')
+            ->assertSee('Linus Torvalds')
+            ->assertSee('Tecnología educativa');
     }
 
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array

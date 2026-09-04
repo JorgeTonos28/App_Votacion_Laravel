@@ -53,7 +53,15 @@
                             <td><span class="participant-order">{{ str_pad((string) $p->presentation_order, 2, '0', STR_PAD_LEFT) }}</span></td>
                             <td>
                                 <div class="table-title">{{ $p->name }}</div>
-                                <div class="table-subtitle">{{ $p->members ?: 'Integrantes no especificados' }}</div>
+                                @if($p->member_names)
+                                    @php
+                                        $memberCount = count($p->member_names);
+                                        $remainingMembers = max(0, $memberCount - 3);
+                                    @endphp
+                                    <div class="table-subtitle">{{ $memberCount }} integrantes · {{ implode(', ', array_slice($p->member_names, 0, 3)) }}{{ $remainingMembers ? " y {$remainingMembers} más" : '' }}</div>
+                                @else
+                                    <div class="table-subtitle">Integrantes no especificados</div>
+                                @endif
                             </td>
                             <td>
                                 <div>{{ $p->project_title ?: 'Sin título' }}</div>
@@ -111,6 +119,11 @@
                 <strong>{{ $selected?->project_title ?? 'Proyecto' }}</strong>
                 <p>{{ $selected?->description ?? 'Agrega la descripción del proyecto.' }}</p>
             </div>
+            @if($selected?->member_names)
+                <div class="member-chip-list" aria-label="Integrantes del equipo">
+                    @foreach($selected->member_names as $member)<span>{{ $member }}</span>@endforeach
+                </div>
+            @endif
         </article>
         <article class="card participant-rules-card">
             <span class="material-symbols-outlined">shield</span>
@@ -127,7 +140,7 @@
             <h2>Agregar participante</h2>
             <div class="form-group"><label for="new-name">Nombre del equipo</label><input class="form-control" id="new-name" name="name" required maxlength="180"></div>
             <div class="form-group"><label for="new-project">Título del proyecto</label><input class="form-control" id="new-project" name="project_title" maxlength="240"></div>
-            <div class="form-group"><label for="new-members">Integrantes</label><input class="form-control" id="new-members" name="members" maxlength="1000"></div>
+            <x-member-list-input id="new-members" :members="old('members', [])" />
             <div class="form-group"><label for="new-area">Área</label><input class="form-control" id="new-area" name="area" maxlength="160"></div>
             <div class="form-group"><label for="new-description">Descripción</label><textarea class="form-control" id="new-description" name="description" maxlength="3000"></textarea></div>
             <div class="dialog-actions"><button class="button button-secondary" type="button" onclick="this.closest('dialog').close()">Cancelar</button><button class="button" type="submit">Agregar</button></div>
@@ -138,7 +151,7 @@
         <form action="{{ route('admin.participants.import', $event) }}" method="post" enctype="multipart/form-data">
             @csrf
             <h2>Importar participantes</h2>
-            <p>CSV UTF-8 con columnas: nombre, proyecto, integrantes, área.</p>
+            <p>CSV UTF-8 con columnas: nombre, proyecto, integrantes, área y descripción. Separa los integrantes con comas o punto y coma dentro de su columna.</p>
             <input class="form-control" type="file" name="csv" accept=".csv,text/csv" required>
             <div class="dialog-actions"><button class="button button-secondary" type="button" onclick="this.closest('dialog').close()">Cancelar</button><button class="button" type="submit">Importar</button></div>
         </form>

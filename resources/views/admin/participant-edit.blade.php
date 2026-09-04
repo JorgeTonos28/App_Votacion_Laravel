@@ -43,10 +43,7 @@
                     <label for="participant-project">Título del proyecto</label>
                     <input class="form-control" id="participant-project" name="project_title" value="{{ old('project_title', $participant->project_title) }}" maxlength="240">
                 </div>
-                <div class="form-group">
-                    <label for="participant-members">Integrantes</label>
-                    <input class="form-control" id="participant-members" name="members" value="{{ old('members', $participant->members) }}" maxlength="1000">
-                </div>
+                <x-member-list-input id="participant-members" :members="old('members', $participant->member_names)" />
                 <div class="form-group">
                     <label for="participant-area">Área</label>
                     <input class="form-control" id="participant-area" name="area" value="{{ old('area', $participant->area) }}" maxlength="160">
@@ -70,8 +67,13 @@
         <p class="participant-preview-project">{{ $participant->project_title ?: 'Título del proyecto' }}</p>
         <div class="participant-preview-meta">
             <span><span class="material-symbols-outlined">category</span>{{ $participant->area ?: 'Área sin definir' }}</span>
-            <span><span class="material-symbols-outlined">groups</span>{{ $participant->members ?: 'Integrantes sin definir' }}</span>
+            <span><span class="material-symbols-outlined">groups</span>{{ $participant->member_names ? count($participant->member_names).' integrantes' : 'Integrantes sin definir' }}</span>
         </div>
+        @if($participant->member_names)
+            <div class="member-chip-list member-chip-list-dark" aria-label="Integrantes del equipo">
+                @foreach($participant->member_names as $member)<span>{{ $member }}</span>@endforeach
+            </div>
+        @endif
         <p>{{ $participant->description ?: 'Agrega una descripción para presentar mejor este proyecto.' }}</p>
     </aside>
 </div>

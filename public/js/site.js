@@ -155,7 +155,8 @@
                     state.publicVoteCount,
                     state.jurorVoteCount,
                     state.currentActorHasVoted,
-                    state.timerIsPaused
+                    state.timerIsPaused,
+                    state.participantFingerprint
                 ].join("|");
                 const current = (fingerprint || "").split("|");
                 const candidate = next.split("|");
@@ -170,7 +171,8 @@
                 });
                 const structuralChanged = current.slice(0, 3).join("|") !== candidate.slice(0, 3).join("|")
                     || current[5] !== candidate[5]
-                    || current[6] !== candidate[6];
+                    || current[6] !== candidate[6]
+                    || current[7] !== candidate[7];
                 fingerprint = next;
                 liveRoot.dataset.state = next;
                 if (structuralChanged) window.location.reload();
@@ -213,6 +215,64 @@
             button.closest("[data-criterion-row]")?.remove();
             renumber();
         });
+    });
+
+    document.querySelectorAll("[data-member-list]").forEach(editor => {
+        const list = editor.querySelector("[data-member-rows]");
+        const template = editor.querySelector("[data-member-template]");
+        const addButton = editor.querySelector("[data-add-member]");
+        const count = editor.querySelector("[data-member-count]");
+        const limit = Number(editor.dataset.memberLimit || 30);
+        const prefix = editor.dataset.memberPrefix || "team-member";
+        if (!list || !template || !addButton) return;
+
+        const rows = () => [...list.querySelectorAll("[data-member-row]")];
+        const refresh = () => {
+            const currentRows = rows();
+            currentRows.forEach((row, index) => {
+                const input = row.querySelector("input[name='members[]']");
+                if (!input) return;
+                input.id = `${prefix}-${index}`;
+                input.setAttribute("aria-label", `Nombre del integrante ${index + 1}`);
+            });
+            const completed = currentRows.filter(row => row.querySelector("input")?.value.trim()).length;
+            if (count) count.textContent = `${completed} ${completed === 1 ? "integrante" : "integrantes"}`;
+            addButton.disabled = currentRows.length >= limit;
+        };
+        const appendRow = () => {
+            if (rows().length >= limit) return;
+            list.append(template.content.cloneNode(true));
+            refresh();
+            rows().at(-1)?.querySelector("input")?.focus();
+        };
+
+        addButton.addEventListener("click", appendRow);
+        list.addEventListener("click", event => {
+            const button = event.target.closest("[data-remove-member]");
+            if (!button) return;
+            const currentRows = rows();
+            if (currentRows.length === 1) {
+                const input = currentRows[0].querySelector("input");
+                if (input) input.value = "";
+                input?.focus();
+            } else {
+                button.closest("[data-member-row]")?.remove();
+            }
+            refresh();
+        });
+        list.addEventListener("input", refresh);
+        list.addEventListener("keydown", event => {
+            if (event.key !== "Enter" || !event.target.matches("input[name='members[]']")) return;
+            event.preventDefault();
+            const currentRows = rows();
+            const currentIndex = currentRows.indexOf(event.target.closest("[data-member-row]"));
+            if (currentIndex < currentRows.length - 1) {
+                currentRows[currentIndex + 1].querySelector("input")?.focus();
+            } else {
+                appendRow();
+            }
+        });
+        refresh();
     });
 
     const jurorInput = document.querySelector("[data-juror-search]");
