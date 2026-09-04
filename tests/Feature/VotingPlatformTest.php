@@ -6,10 +6,12 @@ use App\Mail\JurorAccessMail;
 use App\Models\Criterion;
 use App\Models\Juror;
 use App\Models\Participant;
+use App\Models\Presentation;
 use App\Models\User;
 use App\Models\Vote;
 use App\Models\Voter;
 use App\Models\VotingEvent;
+use App\Models\VotingResult;
 use App\Services\EventQueryService;
 use App\Services\LiveControlService;
 use App\Services\ResultService;
@@ -300,15 +302,17 @@ class VotingPlatformTest extends TestCase
     {
         $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
         $actorId = (string) Str::uuid();
+        $this->get(route('projection.live', $event->code))
+            ->assertOk()
+            ->assertSee('Entrar a votar')
+            ->assertSee('Acceso de jurados')
+            ->assertSee('data-results-redirect', false);
         $event->update(['require_quorum_to_publish' => false]);
         app(ResultService::class)->calculate($event->id, $actorId);
         app(ResultService::class)->publish($event->id, $actorId);
 
         $this->get(route('projection.live', $event->code))
-            ->assertOk()
-            ->assertSee('Entrar a votar')
-            ->assertSee('Acceso de jurados')
-            ->assertSee('?event=BTP726', false);
+            ->assertRedirect(route('projection.ranking', $event->code));
 
         $this->get(route('projection.ranking', $event->code))
             ->assertOk()
@@ -392,6 +396,71 @@ class VotingPlatformTest extends TestCase
         $this->assertTrue($criteria[0]->required);
         $this->assertSame('Coteja alcance y evidencia', $criteria[0]->help_text);
         $this->assertFalse($criteria[1]->required);
+    }
+
+    public function test_event_can_restart_as_a_new_round_without_losing_previous_votes_or_results(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with(['presentations', 'jurors', 'groups.criteria'])->where('code', 'BTP726')->firstOrFail();
+        $presentation = $event->presentations->first();
+        $juror = $event->jurors->first();
+        $juryCriteria = $event->groups->firstWhere('role_type', 'Jury')->criteria;
+        $actorId = (string) $admin->id;
+        $control = app(LiveControlService::class);
+
+        $control->operate($event->id, 'start', $actorId);
+        $control->operate($event->id, 'presentation', $actorId, $presentation->participant_id);
+        $control->operate($event->id, 'open', $actorId, presentationId: $presentation->id);
+        app(VoteService::class)->submit(
+            $this->sessionPayload($event->id, $juror->id, 'Juror'),
+            $presentation->id,
+            'round-1-'.Str::uuid(),
+            $this->answers($juryCriteria, 5),
+        );
+        $control->operate($event->id, 'close', $actorId, presentationId: $presentation->id);
+        app(ResultService::class)->calculate($event->id, $actorId);
+        $event->update(['require_quorum_to_publish' => false]);
+        app(ResultService::class)->publish($event->id, $actorId);
+
+        $roundOneVotes = Vote::query()->where('event_id', $event->id)->where('round_number', 1)->count();
+        $roundOneResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', 1)->count();
+        $this->assertGreaterThan(0, $roundOneResults);
+        $this->assertTrue(VotingResult::query()->where('event_id', $event->id)->where('round_number', 1)->whereNotNull('published_at')->exists());
+
+        $this->actingAs($admin)->post(route('admin.control', [$event, 'restart']))
+            ->assertRedirect()
+            ->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame(2, $event->current_round);
+        $this->assertSame('Draft', $event->status);
+        $this->assertNull($event->active_presentation_id);
+        $this->assertSame($roundOneVotes, Vote::query()->where('event_id', $event->id)->where('round_number', 1)->count());
+        $this->assertSame($roundOneResults, VotingResult::query()->where('event_id', $event->id)->where('round_number', 1)->count());
+        $this->assertTrue(VotingResult::query()->where('event_id', $event->id)->where('round_number', 1)->whereNotNull('published_at')->exists());
+        $this->assertSame(
+            Participant::query()->where('event_id', $event->id)->count(),
+            Presentation::query()->where('event_id', $event->id)->where('round_number', 2)->count(),
+        );
+        $this->assertFalse(Vote::query()->where('event_id', $event->id)->where('round_number', 2)->exists());
+
+        $this->actingAs($admin)->get(route('admin.event.results', ['event' => $event, 'round' => 1]))
+            ->assertOk()
+            ->assertSee('Ronda 1')
+            ->assertSee('Historial conservado');
+
+        $roundTwoPresentation = Presentation::query()->where('event_id', $event->id)->where('round_number', 2)->firstOrFail();
+        $control->operate($event->id, 'lobby', $actorId);
+        $control->operate($event->id, 'start', $actorId);
+        $control->operate($event->id, 'presentation', $actorId, $roundTwoPresentation->participant_id);
+        $control->operate($event->id, 'open', $actorId, presentationId: $roundTwoPresentation->id);
+        app(VoteService::class)->submit(
+            $this->sessionPayload($event->id, $juror->id, 'Juror'),
+            $roundTwoPresentation->id,
+            'round-2-'.Str::uuid(),
+            $this->answers($juryCriteria, 4),
+        );
+        $this->assertDatabaseHas('votes', ['event_id' => $event->id, 'round_number' => 2, 'presentation_id' => $roundTwoPresentation->id]);
     }
 
     public function test_rubric_csv_can_omit_optional_columns_and_distributes_weight(): void

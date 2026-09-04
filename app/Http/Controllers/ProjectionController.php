@@ -47,6 +47,6 @@ class ProjectionController extends Controller
             throw new DomainException('EVENT_NOT_FOUND', 'No encontramos el evento.', 404);
         }
 
-return $event;
+        return $event;
     }
 }

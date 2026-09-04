@@ -36,10 +36,11 @@ class LiveControlService
             if (! in_array($event->status, ['Live', 'LobbyOpen'], true)) {
                 throw $this->invalidTransition();
             }
-            if ($event->presentations->contains(fn ($p) => in_array($p->status, ['OnStage', 'VotingOpen'], true))) {
+            $presentations = $event->presentations->where('round_number', $event->current_round);
+            if ($presentations->contains(fn ($p) => in_array($p->status, ['OnStage', 'VotingOpen'], true))) {
                 throw new DomainException('CONCURRENT_UPDATE', 'Ya existe una presentación activa.', 409);
             }
-            $presentation = $event->presentations->firstWhere('participant_id', $participantId);
+            $presentation = $presentations->firstWhere('participant_id', $participantId);
             if (! $presentation) {
                 throw new DomainException('PARTICIPANT_NOT_FOUND', 'No encontramos el participante.', 404);
             }
@@ -152,7 +153,7 @@ class LiveControlService
         $event = VotingEvent::query()->with('presentations')->find($eventId);
         if (! $event) {
             throw $this->notFound();
-        } if ($event->presentations->contains(fn ($p) => $p->status === 'VotingOpen')) {
+        } if ($event->presentations->where('round_number', $event->current_round)->contains(fn ($p) => $p->status === 'VotingOpen')) {
             throw new DomainException('VOTING_NOT_CLOSED', 'Cierra la votación activa antes de finalizar.');
         }
         $event->update(['active_presentation_id' => null, 'status' => 'Finished']);

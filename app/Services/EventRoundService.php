@@ -33,6 +33,7 @@ class EventRoundService
                 'current_round' => $nextRound,
                 'status' => 'Draft',
                 'active_presentation_id' => null,
+                'archived_at' => null,
                 'version' => $event->version + 1,
             ]);
             $this->audit->write($event->id, 'Administrator', $actorId, 'EVENT_ROUND_RESTARTED', 'Event', $event->id, ['round' => $previousRound], ['round' => $nextRound, 'participants' => $participants->count()]);

@@ -1,4 +1,69 @@
 @extends('layouts.admin') @section('title','Resultados')
 @php $podium=collect($ranking)->take(3); @endphp
-@section('content')<header class="page-heading"><div><h1>Validación de Resultados</h1><p>Revisa la integridad de las votaciones antes de la publicación oficial.</p></div><div class="page-actions"><form action="{{ route('admin.results.recalculate',$event) }}" method="post">@csrf<button class="button button-secondary" type="submit"><span class="material-symbols-outlined">refresh</span> Recalcular</button></form>@if($event->status==='Published')<form action="{{ route('admin.results.unpublish',$event) }}" method="post">@csrf<button class="button button-secondary" data-confirm="Los resultados dejarán de ser públicos. ¿Continuar?" type="submit">Ocultar</button></form>@else<form action="{{ route('admin.results.publish',$event) }}" method="post">@csrf<button class="button button-accent" data-confirm="Se hará público el ranking oficial. ¿Publicar?" type="submit"><span class="material-symbols-outlined">emoji_events</span> Publicar resultados</button></form>@endif</div></header>
-@if(empty($ranking))<section class="card empty-state"><span class="material-symbols-outlined">query_stats</span><h2>Resultados pendientes</h2><p>Recalcula cuando haya votaciones cerradas.</p></section>@else<div class="results-layout"><section class="card podium-card"><h2>Podio preliminar</h2><div class="podium">@foreach([2,1,3] as $place)@php $item=$podium->firstWhere('rank',$place); @endphp<div class="podium-place {{ $place===1?'first':($place===2?'second':'third') }}"><strong>{{ $item['participantName']??'—' }}</strong><small>{{ number_format($item['finalScore']??0,2) }} pts</small><div class="podium-block">{{ $place }}</div></div>@endforeach</div></section><section class="card panel"><header class="panel-header"><h2>Desglose de Votaciones</h2><span class="badge {{ $event->status==='Published'?'badge-success':'badge-warning' }}">{{ $event->status }}</span></header><div class="table-wrap"><table class="data-table"><thead><tr><th>Pos.</th><th>Proyecto</th><th>Jurado</th><th>Público</th><th>Puntaje total</th><th>Quórum</th></tr></thead><tbody>@foreach($ranking as $row)<tr><td><strong>{{ $row['rank'] }}</strong></td><td><div class="table-title">{{ $row['participantName'] }}</div><div class="table-subtitle">{{ $row['projectTitle'] }}</div></td><td>{{ number_format($row['juryScore'],2) }} <small>({{ $row['juryVotes'] }})</small></td><td>{{ number_format($row['publicScore'],2) }} <small>({{ $row['publicVotes'] }})</small></td><td><strong>{{ number_format($row['finalScore'],2) }}</strong></td><td><span class="badge {{ $row['quorumMet']?'badge-success':'badge-warning' }}">{{ $row['quorumMet']?'Válido':'Incompleto' }}</span></td></tr>@endforeach</tbody></table></div></section></div>@endif @endsection
+@section('content')<header class="page-heading">
+<div>
+<h1>Validación de Resultados</h1>
+<p>Ronda {{ $round }} de {{ $event->current_round }} · Revisa la integridad de las votaciones antes de la publicación oficial.</p>
+</div>
+@if($isCurrentRound)<div class="page-actions">
+<form action="{{ route('admin.results.recalculate',$event) }}" method="post">@csrf<button class="button button-secondary" type="submit">
+<span class="material-symbols-outlined">refresh</span> Recalcular</button>
+</form>@if($event->status==='Published')<form action="{{ route('admin.results.unpublish',$event) }}" method="post">@csrf<button class="button button-secondary" data-confirm="Los resultados dejarán de ser públicos. ¿Continuar?" type="submit">Ocultar</button>
+</form>@else<form action="{{ route('admin.results.publish',$event) }}" method="post">@csrf<button class="button button-accent" data-confirm="Se hará público el ranking oficial. ¿Publicar?" type="submit">
+<span class="material-symbols-outlined">emoji_events</span> Publicar resultados</button>
+</form>@endif</div>@else<span class="badge badge-muted">Historial conservado</span>@endif
+</header>
+@if(count($rounds) > 1)<nav class="tabs" aria-label="Historial de rondas">@foreach($rounds as $availableRound)<a class="{{ $availableRound===$round?'is-active':'' }}" href="{{ route('admin.event.results', ['event'=>$event, 'round'=>$availableRound]) }}">Ronda {{ $availableRound }}</a>@endforeach</nav>@endif
+@if(empty($ranking))<section class="card empty-state">
+<span class="material-symbols-outlined">query_stats</span>
+<h2>Resultados pendientes</h2>
+<p>Recalcula cuando haya votaciones cerradas.</p>
+</section>@else<div class="results-layout">
+<section class="card podium-card">
+<h2>Podio preliminar</h2>
+<div class="podium">@foreach([2,1,3] as $place)@php $item=$podium->firstWhere('rank',$place); @endphp<div class="podium-place {{ $place===1?'first':($place===2?'second':'third') }}">
+<strong>{{ $item['participantName']??'—' }}</strong>
+<small>{{ number_format($item['finalScore']??0,2) }} pts</small>
+<div class="podium-block">{{ $place }}</div>
+</div>@endforeach</div>
+</section>
+<section class="card panel">
+<header class="panel-header">
+<h2>Desglose de Votaciones</h2>
+<span class="badge {{ $roundPublished?'badge-success':'badge-warning' }}">Ronda {{ $round }} · {{ $roundPublished?'Publicada':($isCurrentRound?$event->status:'Guardada') }}</span>
+</header>
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>Pos.</th>
+<th>Proyecto</th>
+<th>Jurado</th>
+<th>Público</th>
+<th>Puntaje total</th>
+<th>Quórum</th>
+</tr>
+</thead>
+<tbody>@foreach($ranking as $row)<tr>
+<td>
+<strong>{{ $row['rank'] }}</strong>
+</td>
+<td>
+<div class="table-title">{{ $row['participantName'] }}</div>
+<div class="table-subtitle">{{ $row['projectTitle'] }}</div>
+</td>
+<td>{{ number_format($row['juryScore'],2) }} <small>({{ $row['juryVotes'] }})</small>
+</td>
+<td>{{ number_format($row['publicScore'],2) }} <small>({{ $row['publicVotes'] }})</small>
+</td>
+<td>
+<strong>{{ number_format($row['finalScore'],2) }}</strong>
+</td>
+<td>
+<span class="badge {{ $row['quorumMet']?'badge-success':'badge-warning' }}">{{ $row['quorumMet']?'Válido':'Incompleto' }}</span>
+</td>
+</tr>@endforeach</tbody>
+</table>
+</div>
+</section>
+</div>@endif @endsection

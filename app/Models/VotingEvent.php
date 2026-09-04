@@ -38,7 +38,7 @@ class VotingEvent extends Model
 
     public function presentations(): HasMany
     {
-        return $this->hasMany(Presentation::class, 'event_id')->where('round_number', $this->current_round)->orderBy('sequence');
+        return $this->hasMany(Presentation::class, 'event_id')->orderBy('round_number')->orderBy('sequence');
     }
 
     public function allPresentations(): HasMany

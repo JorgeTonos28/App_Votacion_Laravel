@@ -611,6 +611,24 @@ textarea.form-control { min-height: 105px; resize: vertical; }
 .rubric-editor-card .panel-header h2 { margin-top: .5rem; font-size: 1.35rem; }
 .criterion-editor-list { display: grid; gap: .85rem; }
 .criterion-editor { min-inline-size: 0; margin: 0; padding: .95rem; border: 1px solid var(--outline); border-radius: .65rem; background: var(--surface-low); }
+.csv-hint { font-size: .86rem; min-width: 0; }
+.csv-hint-button { align-items: center; color: var(--primary); cursor: pointer; display: inline-flex; font-weight: 700; gap: .35rem; list-style: none; }
+.csv-hint-button::-webkit-details-marker { display: none; }
+.csv-hint-button .material-symbols-outlined { font-size: 1.1rem; }
+.csv-hint-content { background: var(--surface-low); border: 1px solid var(--outline); border-radius: .55rem; display: grid; gap: .35rem; margin-top: .5rem; max-width: 100%; padding: .65rem .75rem; }
+.csv-hint-content code { display: block; font-size: .73rem; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
+.csv-hint-content small { color: var(--muted); line-height: 1.4; }
+.rubric-import { background: #f4f7ff; border-bottom: 1px solid var(--outline); margin: 0 -1.2rem 1rem; padding: .9rem 1.2rem 1rem; }
+.rubric-import form { align-items: center; display: grid; gap: .65rem .8rem; grid-template-columns: minmax(0, 1fr) auto; }
+.rubric-import form > div { align-items: center; display: flex; gap: .8rem; grid-column: 1 / -1; justify-content: space-between; min-width: 0; }
+.rubric-import form > div > strong { color: var(--primary); font-size: .9rem; white-space: nowrap; }
+.rubric-import form > div > .csv-hint { flex: 1; text-align: right; }
+.rubric-import .csv-hint-button { justify-content: flex-end; margin-left: auto; }
+.rubric-import .csv-hint-content { box-sizing: border-box; text-align: left; width: 100%; }
+.rubric-import .csv-hint { min-width: 0; }
+.rubric-import input[type="file"] { min-width: 0; }
+.rubric-import input[type="file"]::file-selector-button { background: #fff; border: 1px solid var(--outline); border-radius: .4rem; color: var(--primary); cursor: pointer; font: inherit; font-weight: 700; margin-right: .65rem; padding: .45rem .7rem; }
+.rubric-import .button { white-space: nowrap; }
 .criterion-editor legend { padding: 0 .35rem; color: var(--primary); font-size: .85rem; font-weight: 800; }
 .compact-grid { gap: .65rem; }
 .criterion-editor .form-group { margin-bottom: .65rem; }
@@ -1047,6 +1065,13 @@ textarea.form-control { min-height: 105px; resize: vertical; }
     .ranking-panel { padding: 1rem; border-radius: 1rem; }
     .ranking-bar-label strong { font-size: .8rem; }
     .ranking-footer { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 760px) {
+    .rubric-import form { grid-template-columns: 1fr; }
+    .rubric-import form > div { align-items: flex-start; flex-wrap: wrap; }
+    .rubric-import form > div > .csv-hint { flex-basis: 100%; text-align: left; }
+    .rubric-import .csv-hint-button { justify-content: flex-start; margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

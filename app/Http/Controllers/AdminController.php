@@ -91,8 +91,8 @@ class AdminController extends Controller
     public function allResults()
     {
         $events = VotingEvent::query()->withCount('participants')->get()->each(function ($e) {
-            $e->calculated_results = VotingResult::query()->where('event_id', $e->id)->whereNull('voting_group_id')->count();
-            $e->published_at = VotingResult::query()->where('event_id', $e->id)->whereNull('voting_group_id')->value('published_at');
+            $e->calculated_results = VotingResult::query()->where('event_id', $e->id)->where('round_number', $e->current_round)->whereNull('voting_group_id')->count();
+            $e->published_at = VotingResult::query()->where('event_id', $e->id)->where('round_number', $e->current_round)->whereNull('voting_group_id')->value('published_at');
         });
 
         return view('admin.all-results', compact('events'));
@@ -327,7 +327,7 @@ class AdminController extends Controller
 
     public function jurors(VotingEvent $event)
     {
-        $jurors = Juror::query()->where('event_id', $event->id)->orderBy('name')->get()->each(fn ($j) => $j->completed_evaluations = Vote::query()->where('event_id', $event->id)->where('actor_id', $j->id)->where('status', '!=', 'Invalidated')->count());
+        $jurors = Juror::query()->where('event_id', $event->id)->orderBy('name')->get()->each(fn ($j) => $j->completed_evaluations = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('actor_id', $j->id)->where('status', '!=', 'Invalidated')->count());
 
         return view('admin.jurors', compact('event', 'jurors'));
     }
@@ -441,7 +441,7 @@ class AdminController extends Controller
 
     public function voters(VotingEvent $event)
     {
-        $voters = Voter::query()->where('event_id', $event->id)->orderByDesc('last_access_at')->get()->each(fn ($v) => $v->votes_count = Vote::query()->where('event_id', $event->id)->where('actor_id', $v->id)->where('status', '!=', 'Invalidated')->count());
+        $voters = Voter::query()->where('event_id', $event->id)->orderByDesc('last_access_at')->get()->each(fn ($v) => $v->votes_count = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('actor_id', $v->id)->where('status', '!=', 'Invalidated')->count());
 
         return view('admin.voters', compact('event', 'voters'));
     }
@@ -616,7 +616,9 @@ class AdminController extends Controller
     public function control(Request $request, VotingEvent $event, string $operation)
     {
         if (strtolower($operation) === 'restart') {
-            if (Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists()) {
+            $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
+            $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
+            if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
                 $this->results->calculate($event->id, (string) $request->user()->id);
             }
             $round = $this->rounds->restart($event->id, (string) $request->user()->id);
@@ -631,11 +633,15 @@ class AdminController extends Controller
         return back()->with('success', 'Estado actualizado.');
     }
 
-    public function eventResults(VotingEvent $event)
+    public function eventResults(Request $request, VotingEvent $event)
     {
-        $ranking = $this->results->ranking($event->id);
+        $round = max(1, min((int) $event->current_round, (int) $request->integer('round', $event->current_round)));
+        $ranking = $this->results->ranking($event->id, $round);
+        $rounds = range(1, (int) $event->current_round);
+        $isCurrentRound = $round === (int) $event->current_round;
+        $roundPublished = VotingResult::query()->where('event_id', $event->id)->where('round_number', $round)->whereNotNull('published_at')->exists();
 
-        return view('admin.results', compact('event', 'ranking'));
+        return view('admin.results', compact('event', 'ranking', 'round', 'rounds', 'isCurrentRound', 'roundPublished'));
     }
 
     public function recalculate(Request $request, VotingEvent $event)
@@ -670,7 +676,7 @@ class AdminController extends Controller
 
     public function reports(VotingEvent $event)
     {
-        $totalVotes = Vote::query()->where('event_id', $event->id)->where('status', '!=', 'Invalidated')->count();
+        $totalVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->count();
         $activeJurors = Juror::query()->where('event_id', $event->id)->where('status', 'Active')->count();
         $auditEntries = AuditEntry::query()->where('event_id', $event->id)->orderByDesc('timestamp')->limit(100)->get();
         $templates = EventTemplate::query()->where('active', true)->orderBy('name')->get();

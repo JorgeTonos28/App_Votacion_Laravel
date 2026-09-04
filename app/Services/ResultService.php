@@ -120,7 +120,7 @@ class ResultService
             }
         }
 
-return 0;
+        return 0;
     }
 
     private function roleVotes(array $row, string $role): int
@@ -131,6 +131,6 @@ return 0;
             }
         }
 
-return 0;
+        return 0;
     }
 }
