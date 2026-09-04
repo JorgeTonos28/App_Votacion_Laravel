@@ -332,7 +332,22 @@
                     });
                 }
 
-                // 5. Comparar cambios estructurales para recarga de pantalla
+                // 5. Si estamos en una pantalla con formulario de votación (papeleta de votación activa):
+                const hasActiveBallotForm = !!document.querySelector("#ballot-form, form[data-ballot-form], .ballot-form");
+                const noAutoReload = liveRoot.dataset.noReload === "true" || hasActiveBallotForm;
+
+                if (noAutoReload) {
+                    // Si la votación sigue abierta para este equipo, NUNCA recargar la página (protege los votos del usuario)
+                    if (state.presentationStatus === "VotingOpen") {
+                        return;
+                    }
+                    // Si el operador cerró la votación o cambió de presentación, salir de la papeleta y volver al lobby
+                    const lobbyUrl = liveRoot.dataset.lobbyUrl || (window.location.pathname.includes("jurado") ? "/jurado/panel" : "/evento");
+                    window.location.replace(lobbyUrl);
+                    return;
+                }
+
+                // 6. Comparar cambios estructurales para recarga de pantalla (solo en lobbies, proyección y control en vivo)
                 const next = [
                     state.eventStatus,
                     state.roundNumber,
@@ -340,42 +355,58 @@
                     state.presentationStatus,
                     state.publicVoteCount,
                     state.jurorVoteCount,
-                    state.currentActorHasVoted,
-                    state.timerIsPaused,
-                    state.participantFingerprint
+                    state.currentActorHasVoted ? "true" : "false",
+                    state.timerIsPaused ? "true" : "false",
+                    state.participantFingerprint || ""
                 ].join("|");
-                const current = (fingerprint || "").split("|");
-                const candidate = next.split("|");
 
+                if (!fingerprint) {
+                    fingerprint = next;
+                    liveRoot.dataset.state = next;
+                    return;
+                }
+
+                const current = fingerprint.split("|");
+                const candidate = next.split("|");
                 const norm = val => (val === null || val === undefined ? "" : String(val).trim().toLowerCase());
-                const structuralChanged = current.slice(0, 4).map(norm).join("|") !== candidate.slice(0, 4).map(norm).join("|")
-                    || norm(current[6]) !== norm(candidate[6])
-                    || norm(current[7]) !== norm(candidate[7])
-                    || norm(current[8]) !== norm(candidate[8]);
+
+                // Solo recargar si cambia el estado del evento, la ronda, la presentación o su estatus, o si el actor votó
+                const stageChanged = norm(current[0]) !== norm(candidate[0])
+                    || norm(current[1]) !== norm(candidate[1])
+                    || norm(current[2]) !== norm(candidate[2])
+                    || norm(current[3]) !== norm(candidate[3]);
+                const actorVoteChanged = norm(current[6]) !== norm(candidate[6]);
+                const structuralChanged = stageChanged || actorVoteChanged;
+
                 fingerprint = next;
                 liveRoot.dataset.state = next;
 
                 if (structuralChanged) {
                     const activeModal = document.querySelector(".modal-backdrop:not([style*='display: none'])");
-                    // a) Si la votación se acaba de abrir, cerrar modal de equipo y recargar para mostrar papeleta de votación
-                    if (state.presentationStatus === "VotingOpen") {
+                    const justOpenedVoting = norm(current[3]) !== "votingopen" && norm(candidate[3]) === "votingopen";
+
+                    // a) Si la votación se acaba de abrir en el lobby, cerrar modal y recargar para mostrar el botón de votar
+                    if (justOpenedVoting) {
                         if (activeModal && activeModal.id === "public-team-modal") {
                             activeModal.style.display = "none";
                         }
                         window.location.reload();
                         return;
                     }
+
                     // b) Si el modal de reiniciar ronda está abierto en control en vivo, no recargar para no interrumpir al operador
                     if (activeModal && activeModal.id === "restart-round-modal") {
                         return;
                     }
+
                     // c) Si el usuario está leyendo detalles del equipo y la presentación sigue siendo la misma, no recargar
                     if (activeModal && activeModal.id === "public-team-modal") {
-                        const samePresentation = norm(current[2]) === norm(candidate[2]) && norm(current[3]) === norm(candidate[3]);
+                        const samePresentation = norm(current[2]) === norm(candidate[2]);
                         if (samePresentation) {
                             return;
                         }
                     }
+
                     window.location.reload();
                 }
             } catch {
