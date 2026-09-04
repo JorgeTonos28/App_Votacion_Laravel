@@ -121,6 +121,109 @@ return view('account.verify-two-factor');
         return view('account.access-denied');
     }
 
+    public function showSetupPassword(string $token)
+    {
+        $user = User::query()->where('invitation_token', $token)->first();
+        if (! $user || ! $user->invitation_expires_at || $user->invitation_expires_at->isPast()) {
+            return redirect()->route('admin.login')->withErrors(['El enlace de activación es inválido o ha expirado. Solicita una nueva invitación al administrador.']);
+        }
+
+        return view('account.setup-password', compact('user', 'token'));
+    }
+
+    public function setupPassword(Request $request, string $token)
+    {
+        $data = $request->validate([
+            'password' => 'required|string|min:8|confirmed',
+        ], [
+            'password.required' => 'Ingresa una contraseña.',
+            'password.min' => 'La contraseña debe tener al menos 8 caracteres.',
+            'password.confirmed' => 'La confirmación de contraseña no coincide.',
+        ]);
+
+        $user = User::query()->where('invitation_token', $token)->first();
+        if (! $user || ! $user->invitation_expires_at || $user->invitation_expires_at->isPast()) {
+            return redirect()->route('admin.login')->withErrors(['El enlace de activación es inválido o ha expirado.']);
+        }
+
+        $user->update([
+            'password' => Hash::make($data['password']),
+            'invitation_token' => null,
+            'invitation_expires_at' => null,
+            'status' => 'Active',
+            'failed_attempts' => 0,
+            'locked_until' => null,
+        ]);
+
+        Auth::login($user);
+        $request->session()->regenerate();
+
+        return redirect()->route('admin.index')->with('success', '¡Cuenta activada con éxito! Bienvenido al Panel de Innovamente.');
+    }
+
+    public function profile(Request $request)
+    {
+        $user = $request->user();
+
+        return view('account.profile', compact('user'));
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'name' => 'required|string|max:180',
+            'email' => 'required|email|max:254|unique:users,email,'.$user->id,
+        ], [
+            'name.required' => 'Ingresa tu nombre completo.',
+            'email.required' => 'Ingresa tu correo institucional.',
+            'email.unique' => 'Este correo ya está en uso por otra cuenta.',
+        ]);
+
+        $user->update([
+            'name' => trim($data['name']),
+            'email' => trim(strtolower($data['email'])),
+        ]);
+
+        return back()->with('success', 'Tus datos de perfil fueron actualizados.');
+    }
+
+    public function changePassword(Request $request)
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ], [
+            'current_password.required' => 'Ingresa tu contraseña actual.',
+            'password.required' => 'Ingresa tu nueva contraseña.',
+            'password.min' => 'La nueva contraseña debe tener al menos 8 caracteres.',
+            'password.confirmed' => 'La confirmación de la nueva contraseña no coincide.',
+        ]);
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            return back()->withErrors(['current_password' => 'La contraseña actual no es correcta.']);
+        }
+
+        $user->update([
+            'password' => Hash::make($data['password']),
+        ]);
+
+        return back()->with('success', 'Tu contraseña ha sido cambiada exitosamente.');
+    }
+
+    public function disableMfa(Request $request)
+    {
+        $user = $request->user();
+        $user->update([
+            'two_factor_enabled' => false,
+            'two_factor_secret' => null,
+            'two_factor_recovery_codes' => null,
+        ]);
+
+        return back()->with('success', 'El segundo factor (2FA) ha sido desactivado.');
+    }
+
     private function safeReturn(?string $url): string
     {
         return $url && str_starts_with($url, '/') && ! str_starts_with($url, '//') ? $url : '/admin';

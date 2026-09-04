@@ -591,6 +591,335 @@ class VotingPlatformTest extends TestCase
         }
     }
 
+    public function test_event_datetime_preserves_local_time_without_drift_on_repeated_updates(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        $initialStartsAt = '2026-09-15T18:30';
+        $initialEndsAt = '2026-09-15T22:00';
+
+        // 1st update
+        $this->actingAs($admin)->post(route('admin.events.update', $event), [
+            'name' => 'Batalla de Prompts Actualizado',
+            'code' => $event->code,
+            'time_zone' => 'America/Santo_Domingo',
+            'starts_at_local' => $initialStartsAt,
+            'ends_at_local' => $initialEndsAt,
+            'public_access_mode' => $event->public_access_mode,
+            'results_visibility' => $event->results_visibility,
+            'presentation_duration_seconds' => $event->presentation_duration_seconds,
+            'voting_duration_seconds' => $event->voting_duration_seconds,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame('2026-09-15 18:30', $event->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-09-15 22:00', $event->ends_at?->format('Y-m-d H:i'));
+
+        // 2nd update (e.g. updating name only, resending same datetime strings)
+        $this->actingAs($admin)->post(route('admin.events.update', $event), [
+            'name' => 'Batalla de Prompts Segunda Edición',
+            'code' => $event->code,
+            'time_zone' => 'America/Santo_Domingo',
+            'starts_at_local' => $event->starts_at_local,
+            'ends_at_local' => $event->ends_at_local,
+            'public_access_mode' => $event->public_access_mode,
+            'results_visibility' => $event->results_visibility,
+            'presentation_duration_seconds' => $event->presentation_duration_seconds,
+            'voting_duration_seconds' => $event->voting_duration_seconds,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame('2026-09-15 18:30', $event->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-09-15 22:00', $event->ends_at?->format('Y-m-d H:i'));
+
+        // Check the edit view renders the exact datetime in input value
+        $this->actingAs($admin)->get(route('admin.events.edit', $event))
+            ->assertOk()
+            ->assertSee('value="2026-09-15T18:30"', false)
+            ->assertSee('value="2026-09-15T22:00"', false);
+    }
+
+    public function test_responsive_views_and_dynamic_timezones_render_correctly(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        // 1. Voters screen
+        $this->actingAs($admin)->get(route('admin.voters', $event))
+            ->assertOk()
+            ->assertSee('split-admin voters-layout')
+            ->assertSee('voters-side-stack')
+            ->assertSee('voter-action-panel')
+            ->assertSee('Generar códigos')
+            ->assertSee('Importar asistentes');
+
+        // 2. Control room
+        $this->actingAs($admin)->get(route('admin.live', $event))
+            ->assertOk()
+            ->assertSee('control-stage')
+            ->assertSee('data-live-clock', false);
+
+        // 3. Projection screen
+        $this->get(route('projection.live', $event->code))
+            ->assertOk()
+            ->assertSee('projection-stage')
+            ->assertSee('projection-center')
+            ->assertSee('projection-join')
+            ->assertSee('badge badge-live')
+            ->assertSee('BTP726');
+    }
+
+    public function test_admin_can_invite_new_user_and_recipient_activates_account_and_sets_password(): void
+    {
+        Mail::fake();
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+
+        $response = $this->actingAs($admin)->post(route('admin.users.create'), [
+            'name' => 'Carlos Operador',
+            'email' => 'carlos.operador@innovamente.org',
+            'role' => 'Operator',
+        ]);
+        $response->assertRedirect()->assertSessionHas('success');
+
+        $newUser = User::query()->where('email', 'carlos.operador@innovamente.org')->firstOrFail();
+        $this->assertSame('Pending', $newUser->status);
+        $this->assertSame('Operator', $newUser->role);
+        $this->assertNotEmpty($newUser->invitation_token);
+        $this->assertTrue($newUser->invitation_expires_at->isFuture());
+        Mail::assertSent(\App\Mail\UserInvitationMail::class);
+
+        $activationToken = $newUser->invitation_token;
+        $this->get(route('auth.invitation.accept', $activationToken))
+            ->assertOk()
+            ->assertSee('Activar tu cuenta')
+            ->assertSee('Carlos Operador');
+
+        $setupResponse = $this->post(route('auth.invitation.setup', $activationToken), [
+            'password' => 'CarlosPass2026!',
+            'password_confirmation' => 'CarlosPass2026!',
+        ]);
+        $setupResponse->assertRedirect(route('admin.index'))->assertSessionHas('success');
+
+        $newUser->refresh();
+        $this->assertSame('Active', $newUser->status);
+        $this->assertNull($newUser->invitation_token);
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('CarlosPass2026!', $newUser->password));
+        $this->assertAuthenticatedAs($newUser);
+    }
+
+    public function test_admin_can_add_global_juror_and_view_all_jurors(): void
+    {
+        Mail::fake();
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        $response = $this->actingAs($admin)->post(route('admin.jurors.global.add'), [
+            'event_id' => $event->id,
+            'name' => 'Dra. Isabel Santana',
+            'title' => 'Especialista en IA',
+            'email' => 'isabel.santana@example.org',
+            'individual_weight' => 1.2,
+        ]);
+        $response->assertRedirect()->assertSessionHas('success')->assertSessionHas('issuedJuror');
+
+        $this->assertDatabaseHas('jurors', [
+            'event_id' => $event->id,
+            'name' => 'Dra. Isabel Santana',
+            'title' => 'Especialista en IA',
+            'email' => 'isabel.santana@example.org',
+        ]);
+
+        $this->actingAs($admin)->get(route('admin.jurors.all'))
+            ->assertOk()
+            ->assertSee('Dra. Isabel Santana')
+            ->assertSee('Ver historial');
+    }
+
+    public function test_flexible_round_restart_can_reset_same_round_or_advance_next_round(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with(['presentations', 'jurors', 'groups.criteria'])->where('code', 'BTP726')->firstOrFail();
+        $presentation = $event->presentations->first();
+        $juror = $event->jurors->first();
+        $juryCriteria = $event->groups->firstWhere('role_type', 'Jury')->criteria;
+        $actorId = (string) $admin->id;
+        $control = app(LiveControlService::class);
+
+        $control->operate($event->id, 'start', $actorId);
+        $control->operate($event->id, 'presentation', $actorId, $presentation->participant_id);
+        $control->operate($event->id, 'open', $actorId, presentationId: $presentation->id);
+        app(VoteService::class)->submit(
+            $this->sessionPayload($event->id, $juror->id, 'Juror'),
+            $presentation->id,
+            'same-round-test-'.Str::uuid(),
+            $this->answers($juryCriteria, 5),
+        );
+
+        $this->assertTrue(Vote::query()->where('event_id', $event->id)->where('round_number', 1)->exists());
+
+        $this->actingAs($admin)->post(route('admin.control', [$event, 'restart']), [
+            'round_mode' => 'same_round',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame(1, $event->current_round);
+        $this->assertSame('Draft', $event->status);
+        $this->assertNull($event->active_presentation_id);
+        $this->assertFalse(Vote::query()->where('event_id', $event->id)->where('round_number', 1)->exists());
+    }
+
+    public function test_live_control_can_reset_single_team_turn_and_add_presentation_time(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with(['presentations.participant'])->where('code', 'BTP726')->firstOrFail();
+        $presentation = $event->presentations->first();
+        $actorId = (string) $admin->id;
+        $control = app(LiveControlService::class);
+
+        $control->operate($event->id, 'start', $actorId);
+        $control->operate($event->id, 'presentation', $actorId, $presentation->participant_id);
+
+        $presentation->refresh();
+        $this->assertSame('OnStage', $presentation->status);
+
+        $this->actingAs($admin)->post(route('admin.control', [$event, 'add_time']), [
+            'presentation_id' => $presentation->id,
+            'seconds' => 60,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $presentation->refresh();
+        $this->assertSame(60, $presentation->paused_timer_seconds);
+
+        $this->actingAs($admin)->post(route('admin.control', [$event, 'reset_turn']), [
+            'presentation_id' => $presentation->id,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $presentation->refresh();
+        $this->assertSame('Pending', $presentation->status);
+        $this->assertNull($event->fresh()->active_presentation_id);
+    }
+
+    public function test_user_can_update_own_profile_and_change_password(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+
+        $this->actingAs($admin)->get(route('admin.profile'))
+            ->assertOk()
+            ->assertSee('Mi Perfil')
+            ->assertSee($admin->email);
+
+        $this->actingAs($admin)->post(route('admin.profile.update'), [
+            'name' => 'Admin Modificado',
+            'email' => 'admin.nuevo@innovamente.local',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $admin->refresh();
+        $this->assertSame('Admin Modificado', $admin->name);
+        $this->assertSame('admin.nuevo@innovamente.local', $admin->email);
+
+        $this->actingAs($admin)->post(route('admin.profile.password'), [
+            'current_password' => 'Admin-InnovaMente!2026',
+            'password' => 'NuevoPasswordSeguro2026!',
+            'password_confirmation' => 'NuevoPasswordSeguro2026!',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('NuevoPasswordSeguro2026!', $admin->fresh()->password));
+    }
+
+    public function test_returning_device_voter_is_automatically_identified_without_reasking_name(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $deviceId = (string) Str::uuid();
+
+        // 1. First time access: voter registers with device and name
+        $response = $this->withCookie('innovamente_device', $deviceId)
+            ->post(route('event.access'), [
+                'event_code' => $event->code,
+                'display_name' => 'María Rodríguez',
+            ]);
+
+        $response->assertRedirect(route('public.lobby'));
+        $response->assertCookie('innovamente_public');
+
+        // 2. Return access via /e/{code}: with session cleared but device cookie preserved
+        $returnDirect = $this->withCookie('innovamente_device', $deviceId)
+            ->get(route('event.code', ['code' => $event->code]));
+
+        $returnDirect->assertRedirect(route('public.lobby'));
+        $returnDirect->assertCookie('innovamente_public');
+
+        // 3. Return access via form submission without name
+        $returnForm = $this->withCookie('innovamente_device', $deviceId)
+            ->post(route('event.access'), [
+                'event_code' => $event->code,
+                'display_name' => '',
+            ]);
+
+        $returnForm->assertRedirect(route('public.lobby'));
+        $returnForm->assertCookie('innovamente_public');
+    }
+
+    public function test_admin_templates_workflow_and_event_creation_from_template(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+
+        // 1. Settings view renders templates
+        $this->actingAs($admin)->get(route('admin.settings'))
+            ->assertOk()
+            ->assertSee('Plantillas de Eventos')
+            ->assertSee('Nueva Plantilla');
+
+        // 2. Admin creates a new template with criteria
+        $this->actingAs($admin)->post(route('admin.templates.create'), [
+            'name' => 'Demo Day Tecnológico',
+            'description' => 'Plantilla para evaluación de startups de base tecnológica',
+            'category' => 'Startup',
+            'presentation_duration_minutes' => 4,
+            'voting_duration_minutes' => 3,
+            'jury_weight_percent' => 80,
+            'public_weight_percent' => 20,
+            'public_access_mode' => 'Device',
+            'criteria_text' => "Innovación Tecnológica: 30\nTracción y Negocio: 35\nEquipo y Pitch: 35",
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $template = \App\Models\EventTemplate::query()->where('name', 'Demo Day Tecnológico')->firstOrFail();
+        $this->assertSame(4 * 60, $template->configValue('presentation_duration_seconds'));
+        $this->assertSame(80.0, $template->juryWeight());
+        $this->assertCount(3, $template->criteria());
+
+        // 3. Admin creates an event using this template
+        $uniqueCode = 'TPL' . rand(100, 999);
+        $this->actingAs($admin)->post(route('admin.events.store'), [
+            'template_id' => $template->id,
+            'name' => 'Pitch Competition 2026',
+            'code' => $uniqueCode,
+            'starts_at_local' => '2026-10-01T10:00',
+            'ends_at_local' => '2026-10-01T14:00',
+            'time_zone' => 'America/Santo_Domingo',
+            'public_access_mode' => 'Device',
+            'results_visibility' => 'ParticipationOnly',
+            'presentation_duration_seconds' => 240,
+            'voting_duration_seconds' => 180,
+            'jury_weight_percent' => 80,
+            'public_weight_percent' => 20,
+            'allow_juror_vote_edit' => 1,
+        ])->assertRedirect();
+
+        $newEvent = VotingEvent::query()->where('code', $uniqueCode)->firstOrFail();
+        $juryGroup = $newEvent->groups()->where('role_type', 'Jury')->with('criteria')->firstOrFail();
+        $this->assertCount(3, $juryGroup->criteria);
+        $this->assertTrue($juryGroup->criteria->pluck('name')->contains('Innovación Tecnológica'));
+
+        // 4. Admin saves an existing event as a template
+        $this->actingAs($admin)->post(route('admin.events.save-template', $newEvent), [
+            'template_name' => 'Copia de Pitch Competition',
+            'template_description' => 'Plantilla derivada de Pitch Competition',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->assertTrue(\App\Models\EventTemplate::query()->where('name', 'Copia de Pitch Competition')->exists());
+    }
+
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
     {
         return [
@@ -610,3 +939,4 @@ class VotingPlatformTest extends TestCase
         ])->all();
     }
 }
+
