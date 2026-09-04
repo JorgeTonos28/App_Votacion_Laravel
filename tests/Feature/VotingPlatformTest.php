@@ -591,6 +591,85 @@ class VotingPlatformTest extends TestCase
         }
     }
 
+    public function test_event_datetime_preserves_local_time_without_drift_on_repeated_updates(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        $initialStartsAt = '2026-09-15T18:30';
+        $initialEndsAt = '2026-09-15T22:00';
+
+        // 1st update
+        $this->actingAs($admin)->post(route('admin.events.update', $event), [
+            'name' => 'Batalla de Prompts Actualizado',
+            'code' => $event->code,
+            'time_zone' => 'America/Santo_Domingo',
+            'starts_at_local' => $initialStartsAt,
+            'ends_at_local' => $initialEndsAt,
+            'public_access_mode' => $event->public_access_mode,
+            'results_visibility' => $event->results_visibility,
+            'presentation_duration_seconds' => $event->presentation_duration_seconds,
+            'voting_duration_seconds' => $event->voting_duration_seconds,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame('2026-09-15 18:30', $event->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-09-15 22:00', $event->ends_at?->format('Y-m-d H:i'));
+
+        // 2nd update (e.g. updating name only, resending same datetime strings)
+        $this->actingAs($admin)->post(route('admin.events.update', $event), [
+            'name' => 'Batalla de Prompts Segunda Edición',
+            'code' => $event->code,
+            'time_zone' => 'America/Santo_Domingo',
+            'starts_at_local' => $event->starts_at_local,
+            'ends_at_local' => $event->ends_at_local,
+            'public_access_mode' => $event->public_access_mode,
+            'results_visibility' => $event->results_visibility,
+            'presentation_duration_seconds' => $event->presentation_duration_seconds,
+            'voting_duration_seconds' => $event->voting_duration_seconds,
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $event->refresh();
+        $this->assertSame('2026-09-15 18:30', $event->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-09-15 22:00', $event->ends_at?->format('Y-m-d H:i'));
+
+        // Check the edit view renders the exact datetime in input value
+        $this->actingAs($admin)->get(route('admin.events.edit', $event))
+            ->assertOk()
+            ->assertSee('value="2026-09-15T18:30"', false)
+            ->assertSee('value="2026-09-15T22:00"', false);
+    }
+
+    public function test_responsive_views_and_dynamic_timezones_render_correctly(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        // 1. Voters screen
+        $this->actingAs($admin)->get(route('admin.voters', $event))
+            ->assertOk()
+            ->assertSee('split-admin voters-layout')
+            ->assertSee('voters-side-stack')
+            ->assertSee('voter-action-panel')
+            ->assertSee('Generar códigos')
+            ->assertSee('Importar asistentes');
+
+        // 2. Control room
+        $this->actingAs($admin)->get(route('admin.live', $event))
+            ->assertOk()
+            ->assertSee('control-stage')
+            ->assertSee('data-live-clock', false);
+
+        // 3. Projection screen
+        $this->get(route('projection.live', $event->code))
+            ->assertOk()
+            ->assertSee('projection-stage')
+            ->assertSee('projection-center')
+            ->assertSee('projection-join')
+            ->assertSee('badge badge-live')
+            ->assertSee('BTP726');
+    }
+
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
     {
         return [
@@ -610,3 +689,4 @@ class VotingPlatformTest extends TestCase
         ])->all();
     }
 }
+

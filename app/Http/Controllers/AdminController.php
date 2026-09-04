@@ -863,7 +863,7 @@ class AdminController extends Controller
 
     private function utc(?string $value, string $zone): ?Carbon
     {
-        return $value ? Carbon::parse($value, $zone)->utc() : null;
+        return $value ? Carbon::parse($value, $zone)->setTimezone(config('app.timezone', 'UTC')) : null;
     }
 
     private function configurationLocked(VotingEvent $event): bool

@@ -24,13 +24,14 @@
 <div class="metric-value">{{ $voteCount }}</div>
 </article>
 </section>
-<div class="content-grid">
+<div class="split-admin voters-layout">
 <section class="card panel">
 <header class="panel-header">
 <div>
 <h2>Directorio de acceso</h2>
-<p class="table-subtitle">Los códigos solo se muestran en el CSV al momento de generarlos.</p>
+<p class="form-hint">Los códigos solo se muestran en el CSV al momento de generarlos.</p>
 </div>
+<span class="badge badge-primary">{{ $voters->count() }} registrados</span>
 </header>
 <div class="table-wrap">
 <table class="data-table">
@@ -41,40 +42,41 @@
 <th>Estado</th>
 <th>Último acceso</th>
 <th>Votos</th>
-<th>
-</th>
+<th class="align-right">Acción</th>
 </tr>
 </thead>
 <tbody>@if($voters->isEmpty())<tr>
-<td colspan="6" class="empty-cell">Aún no hay votantes registrados. En modo dispositivo se crean al ingresar.</td>
+<td colspan="6"><div class="empty-state"><span class="material-symbols-outlined">how_to_reg</span><h3>Aún no hay votantes registrados</h3><p>En modo dispositivo se registran automáticamente al ingresar al evento.</p></div></td>
 </tr>@endif @foreach($voters as $voter)<tr>
 <td>
-<strong>{{ $voter->display_name??'Dispositivo anónimo' }}</strong>
+<div class="table-title">{{ $voter->display_name ?? 'Dispositivo anónimo' }}</div>
 <div class="table-subtitle">{{ $voter->external_id }}</div>
 </td>
 <td>{{ $voter->mode }}</td>
 <td>
 <span class="badge {{ $voter->status==='Active'?'badge-success':'badge-muted' }}">{{ $voter->status }}</span>
 </td>
-<td>{{ $voter->last_access_at->setTimezone('America/Santo_Domingo')->format('d/m/Y H:i') }}</td>
+<td>{{ $voter->last_access_at ? $voter->last_access_at->setTimezone($event->time_zone ?: config('app.timezone', 'America/Santo_Domingo'))->format('d/m/Y H:i') : 'Sin actividad' }}</td>
 <td>{{ $voter->votes_count }}</td>
 <td>
+<div class="table-actions">
 <form action="{{ route('admin.voters.status',$voter) }}" method="post">@csrf<input type="hidden" name="status" value="{{ $voter->status==='Active'?'Revoked':'Active' }}">
-<button class="icon-button" type="submit" title="Cambiar estado">
+<button class="icon-button" type="submit" title="{{ $voter->status==='Active'?'Revocar acceso':'Reactivar acceso' }}">
 <span class="material-symbols-outlined">{{ $voter->status==='Active'?'block':'restart_alt' }}</span>
 </button>
 </form>
+</div>
 </td>
 </tr>@endforeach</tbody>
 </table>
 </div>
 </section>
-<aside class="stack">
-<section class="card panel">
-<header class="panel-header">
+<aside class="voters-side-stack">
+<section class="card panel voter-action-panel">
+<header class="panel-header compact-header">
 <h2>Generar códigos</h2>
 </header>
-<form class="panel-body stack" action="{{ route('admin.voters.generate',$event) }}" method="post">@csrf<div class="form-group">
+<form class="panel-body voter-form-stack" action="{{ route('admin.voters.generate',$event) }}" method="post">@csrf<div class="form-group">
 <label for="batch-count">Cantidad</label>
 <input id="batch-count" class="form-control" name="count" type="number" min="1" max="500" value="25">
 </div>
@@ -86,12 +88,14 @@
 <span class="material-symbols-outlined">key</span> Generar y descargar CSV</button>
 </form>
 </section>
-<section class="card panel">
-<header class="panel-header">
+<section class="card panel voter-action-panel">
+<header class="panel-header compact-header">
 <h2>Importar asistentes</h2>
 </header>
-<form class="panel-body stack" action="{{ route('admin.voters.import',$event) }}" method="post" enctype="multipart/form-data">@csrf<x-csv-hint :columns="['identificador', 'nombre']" :required="['identificador']" note="El identificador puede ser matrícula, correo u otro dato acordado." />
+<form class="panel-body voter-form-stack" action="{{ route('admin.voters.import',$event) }}" method="post" enctype="multipart/form-data">@csrf<x-csv-hint :columns="['identificador', 'nombre']" :required="['identificador']" note="El identificador puede ser matrícula, correo u otro dato acordado." />
+<div class="form-group">
 <input class="form-control" type="file" name="csv" accept=".csv,text/csv" required>
+</div>
 <button class="button button-secondary button-block" type="submit">
 <span class="material-symbols-outlined">upload_file</span> Importar lista</button>
 </form>

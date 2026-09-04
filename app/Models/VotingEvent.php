@@ -55,4 +55,24 @@ class VotingEvent extends Model
     {
         return $this->hasMany(Voter::class, 'event_id');
     }
+
+    public function getStartsAtLocalAttribute(): ?string
+    {
+        if (! $this->starts_at) {
+            return null;
+        }
+        $tz = $this->time_zone ?: config('app.timezone', 'America/Santo_Domingo');
+
+        return $this->starts_at->copy()->setTimezone($tz)->format('Y-m-d\TH:i');
+    }
+
+    public function getEndsAtLocalAttribute(): ?string
+    {
+        if (! $this->ends_at) {
+            return null;
+        }
+        $tz = $this->time_zone ?: config('app.timezone', 'America/Santo_Domingo');
+
+        return $this->ends_at->copy()->setTimezone($tz)->format('Y-m-d\TH:i');
+    }
 }
