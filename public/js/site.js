@@ -136,6 +136,66 @@
         window.setInterval(render, 1000);
     });
 
+    const resultsGate = document.querySelector("[data-results-gate]");
+    if (resultsGate) {
+        const duration = Number(resultsGate.dataset.resultsDuration || 30000);
+        const stateEndpoint = resultsGate.dataset.resultsState;
+        const isPublished = resultsGate.dataset.resultsPublished === "true";
+        const revealKey = `innovamente-results:${resultsGate.dataset.eventCode}:round-${resultsGate.dataset.roundNumber}`;
+        const publishedContent = resultsGate.querySelector(".results-published-content");
+        const stageLabel = resultsGate.querySelector("[data-results-stage]");
+        let calculationStarted = false;
+
+        const storage = {
+            get: key => { try { return window.sessionStorage.getItem(key); } catch { return null; } },
+            set: (key, value) => { try { window.sessionStorage.setItem(key, value); } catch {} },
+            remove: key => { try { window.sessionStorage.removeItem(key); } catch {} }
+        };
+        const reveal = () => {
+            resultsGate.classList.remove("is-waiting", "is-calculating");
+            resultsGate.classList.add("is-revealed");
+            publishedContent?.setAttribute("aria-hidden", "false");
+        };
+        const calculate = reloadAfter => {
+            if (calculationStarted) return;
+            calculationStarted = true;
+            resultsGate.classList.remove("is-waiting", "is-revealed");
+            resultsGate.classList.add("is-calculating");
+            resultsGate.style.setProperty("--results-duration", `${duration}ms`);
+            const stages = [
+                "Recopilando las evaluaciones recibidas…",
+                "Validando votos y ponderaciones…",
+                "Ordenando las posiciones finales…"
+            ];
+            if (stageLabel) stageLabel.textContent = stages[0];
+            window.setTimeout(() => { if (stageLabel) stageLabel.textContent = stages[1]; }, duration / 3);
+            window.setTimeout(() => { if (stageLabel) stageLabel.textContent = stages[2]; }, duration * 2 / 3);
+            window.setTimeout(() => {
+                storage.set(revealKey, "revealed");
+                if (reloadAfter) window.location.reload();
+                else reveal();
+            }, duration);
+        };
+
+        if (isPublished) {
+            if (storage.get(revealKey) === "revealed") reveal();
+            else calculate(false);
+        } else {
+            storage.remove(revealKey);
+            const checkPublication = async () => {
+                try {
+                    const response = await fetch(stateEndpoint, { headers: { Accept: "application/json" }, cache: "no-store" });
+                    if (!response.ok) return;
+                    const envelope = await response.json();
+                    if (envelope.ok && envelope.data.eventStatus === "Published") calculate(true);
+                } catch {
+                    document.body.classList.add("connection-lost");
+                }
+            };
+            window.setInterval(checkPublication, 3000 + Math.floor(Math.random() * 700));
+        }
+    }
+
     const liveRoot = document.querySelector("[data-live-poll]");
     if (liveRoot) {
         let fingerprint = liveRoot.dataset.state;

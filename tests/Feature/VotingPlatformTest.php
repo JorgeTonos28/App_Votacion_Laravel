@@ -302,6 +302,11 @@ class VotingPlatformTest extends TestCase
     {
         $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
         $actorId = (string) Str::uuid();
+        $this->get(route('projection.ranking', $event->code))
+            ->assertOk()
+            ->assertSee('Los resultados aún no han sido publicados')
+            ->assertSee('data-results-published="false"', false)
+            ->assertDontSee('Podio de ganadores');
         $this->get(route('projection.live', $event->code))
             ->assertOk()
             ->assertSee('Entrar a votar')
@@ -316,6 +321,9 @@ class VotingPlatformTest extends TestCase
 
         $this->get(route('projection.ranking', $event->code))
             ->assertOk()
+            ->assertSee('Preparando los resultados')
+            ->assertSee('data-results-duration="30000"', false)
+            ->assertSee('data-results-published="true"', false)
             ->assertSee('Podio de ganadores')
             ->assertSee('Rendimiento por equipo')
             ->assertSee('ranking-bar-row', false)

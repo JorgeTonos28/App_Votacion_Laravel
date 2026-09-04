@@ -27,12 +27,11 @@ class ProjectionController extends Controller
     public function ranking(string $eventCode)
     {
         $event = $this->event($eventCode);
-        if ($event->status !== 'Published') {
-            throw new DomainException('RESULTS_NOT_PUBLISHED', 'Los resultados todavía no han sido publicados.', 403);
-        }$state = $this->queries->liveStateByCode($event->code);
-        $ranking = $this->results->ranking($event->id);
+        $published = $event->status === 'Published';
+        $state = $this->queries->liveStateByCode($event->code);
+        $ranking = $published ? $this->results->ranking($event->id) : [];
 
-        return view('projection.ranking', compact('event', 'state', 'ranking'));
+        return view('projection.ranking', compact('event', 'state', 'ranking', 'published'));
     }
 
     public function state(string $eventCode)
