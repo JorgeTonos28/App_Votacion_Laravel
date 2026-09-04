@@ -148,8 +148,13 @@
                 const envelope = await response.json();
                 if (!envelope.ok) return;
                 const state = envelope.data;
+                if (liveRoot.dataset.resultsRedirect && state.eventStatus === "Published") {
+                    window.location.assign(liveRoot.dataset.resultsRedirect);
+                    return;
+                }
                 const next = [
                     state.eventStatus,
+                    state.roundNumber,
                     state.presentationId,
                     state.presentationStatus,
                     state.publicVoteCount,
@@ -169,10 +174,10 @@
                     const total = Number(item.closest("[data-live-poll]")?.dataset.jurorTotal || 0);
                     if (total > 0) item.style.width = `${Math.min(100, state.jurorVoteCount * 100 / total)}%`;
                 });
-                const structuralChanged = current.slice(0, 3).join("|") !== candidate.slice(0, 3).join("|")
-                    || current[5] !== candidate[5]
+                const structuralChanged = current.slice(0, 4).join("|") !== candidate.slice(0, 4).join("|")
                     || current[6] !== candidate[6]
-                    || current[7] !== candidate[7];
+                    || current[7] !== candidate[7]
+                    || current[8] !== candidate[8];
                 fingerprint = next;
                 liveRoot.dataset.state = next;
                 if (structuralChanged) window.location.reload();

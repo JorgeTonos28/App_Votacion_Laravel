@@ -21,9 +21,11 @@ use App\Models\VotingGroup;
 use App\Models\VotingResult;
 use App\Services\AuditService;
 use App\Services\EventQueryService;
+use App\Services\EventRoundService;
 use App\Services\LiveControlService;
 use App\Services\QrCodeService;
 use App\Services\ResultService;
+use App\Services\RubricCsvImporter;
 use App\Services\VoteService;
 use App\Support\Domain;
 use Illuminate\Http\Request;
@@ -37,10 +39,12 @@ class AdminController extends Controller
     public function __construct(
         private readonly AuditService $audit,
         private readonly EventQueryService $queries,
+        private readonly EventRoundService $rounds,
         private readonly LiveControlService $liveControl,
         private readonly ResultService $results,
         private readonly VoteService $votes,
         private readonly QrCodeService $qr,
+        private readonly RubricCsvImporter $rubricCsvImporter,
     ) {}
 
     public function index()
@@ -205,7 +209,8 @@ class AdminController extends Controller
         $number = (int) Participant::query()->where('event_id', $data['event_id'])->max('number') + 1;
         DB::transaction(function () use ($data, $number, $request) {
             $p = Participant::query()->create(['event_id' => $data['event_id'], 'number' => $number, 'presentation_order' => $number, 'name' => trim($data['name']), 'project_title' => trim($data['project_title'] ?? '') ?: null, 'members' => Participant::serializeMemberNames($data['members'] ?? []), 'area' => trim($data['area'] ?? '') ?: null, 'description' => trim($data['description'] ?? '') ?: null]);
-            Presentation::query()->create(['event_id' => $data['event_id'], 'participant_id' => $p->id, 'sequence' => $number]);
+            $round = (int) VotingEvent::query()->whereKey($data['event_id'])->value('current_round');
+            Presentation::query()->create(['event_id' => $data['event_id'], 'participant_id' => $p->id, 'round_number' => $round, 'sequence' => $number]);
             $this->audit->write($data['event_id'], 'Administrator', (string) $request->user()->id, 'PARTICIPANT_CREATED', 'Participant', $p->id, newValue: ['name' => $p->name]);
         });
 
@@ -226,7 +231,7 @@ class AdminController extends Controller
                 continue;
             }$order++;
             $p = Participant::query()->create(['event_id' => $event->id, 'number' => $order, 'presentation_order' => $order, 'name' => trim($c[0]), 'project_title' => trim($c[1] ?? '') ?: null, 'members' => Participant::serializeMemberNames($c[2] ?? null), 'area' => trim($c[3] ?? '') ?: null, 'description' => trim($c[4] ?? '') ?: null]);
-            Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'sequence' => $order]);
+            Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'round_number' => $event->current_round, 'sequence' => $order]);
         }
 
         return back()->with('success', 'Participantes importados.');
@@ -550,6 +555,48 @@ class AdminController extends Controller
         return back()->with('success', "Rúbrica de {$group->name} guardada.");
     }
 
+    public function importRubric(Request $request, VotingEvent $event)
+    {
+        if ($this->configurationLocked($event)) {
+            return back()->with('error', 'La rúbrica queda bloqueada cuando el evento inicia.');
+        }
+        $data = $request->validate([
+            'voting_group_id' => 'required|uuid',
+            'csv' => 'required|file|max:2048|mimes:csv,txt',
+        ]);
+        $group = VotingGroup::query()->whereKey($data['voting_group_id'])->where('event_id', $event->id)->first();
+        if (! $group) {
+            return back()->with('error', 'No encontramos la audiencia de evaluación.');
+        }
+        $import = $this->rubricCsvImporter->parse($request->file('csv')->getRealPath());
+
+        DB::transaction(function () use ($import, $group, $event, $request) {
+            Criterion::query()->where('voting_group_id', $group->id)->delete();
+            foreach ($import['criteria'] as $index => $criterion) {
+                Criterion::query()->create([
+                    'id' => Domain::uuid(),
+                    'event_id' => $event->id,
+                    'voting_group_id' => $group->id,
+                    'name' => $criterion['name'],
+                    'description' => $criterion['description'],
+                    'weight' => $criterion['weight_percent'] / 100,
+                    'scale_min' => $criterion['scale_min'],
+                    'scale_max' => $criterion['scale_max'],
+                    'minimum_label' => $criterion['minimum_label'],
+                    'maximum_label' => $criterion['maximum_label'],
+                    'required' => $criterion['required'],
+                    'comment_mode' => $criterion['comment_mode'],
+                    'help_text' => $criterion['help_text'],
+                    'sort_order' => $index + 1,
+                    'enabled' => true,
+                ]);
+            }
+            $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRIC_IMPORTED', 'VotingGroup', $group->id, newValue: ['group' => $group->name, 'criteria' => count($import['criteria']), 'columns' => $import['columns']]);
+        });
+
+        return back()->with('success', count($import['criteria'])." criterios importados para {$group->name}.");
+    }
+
     public function live(VotingEvent $event)
     {
         $event->load('branding');
@@ -568,6 +615,14 @@ class AdminController extends Controller
 
     public function control(Request $request, VotingEvent $event, string $operation)
     {
+        if (strtolower($operation) === 'restart') {
+            if (Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists()) {
+                $this->results->calculate($event->id, (string) $request->user()->id);
+            }
+            $round = $this->rounds->restart($event->id, (string) $request->user()->id);
+
+            return back()->with('success', "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.");
+        }
         $this->liveControl->operate($event->id, $operation, (string) $request->user()->id, $request->input('participant_id'), $request->input('presentation_id'), $request->input('reason'));
         if (in_array(strtolower($operation), ['close', 'finish'], true)) {
             $this->results->calculate($event->id, (string) $request->user()->id);

@@ -151,7 +151,7 @@
         <form action="{{ route('admin.participants.import', $event) }}" method="post" enctype="multipart/form-data">
             @csrf
             <h2>Importar participantes</h2>
-            <p>CSV UTF-8 con columnas: nombre, proyecto, integrantes, área y descripción. Separa los integrantes con comas o punto y coma dentro de su columna.</p>
+            <x-csv-hint :columns="['nombre', 'proyecto', 'integrantes', 'area', 'descripcion']" :required="['nombre']" note="Usa la primera fila como encabezado. Separa los integrantes con punto y coma dentro de su columna." />
             <input class="form-control" type="file" name="csv" accept=".csv,text/csv" required>
             <div class="dialog-actions"><button class="button button-secondary" type="button" onclick="this.closest('dialog').close()">Cancelar</button><button class="button" type="submit">Importar</button></div>
         </form>

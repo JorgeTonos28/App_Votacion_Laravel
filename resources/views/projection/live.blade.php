@@ -3,12 +3,12 @@
 @section('title', 'Proyección en vivo')
 
 @php
-    $fingerprint = implode('|', [$state['eventStatus'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'True' : 'False', $state['timerIsPaused'] ? 'True' : 'False', $state['participantFingerprint']]);
+    $fingerprint = implode('|', [$state['eventStatus'], $state['roundNumber'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'True' : 'False', $state['timerIsPaused'] ? 'True' : 'False', $state['participantFingerprint']]);
     $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
 @endphp
 
 @section('content')
-<main class="projection-stage" data-live-poll="{{ route('projection.state', $event->code) }}" data-poll-interval="3000" data-juror-total="{{ $state['jurorTotal'] }}" data-state="{{ $fingerprint }}">
+<main class="projection-stage" data-live-poll="{{ route('projection.state', $event->code) }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}" data-poll-interval="3000" data-juror-total="{{ $state['jurorTotal'] }}" data-state="{{ $fingerprint }}">
     <section class="projection-join">
         <span class="eyebrow">Código del evento</span>
         <div class="event-code">{{ $event->code }}</div>
@@ -26,7 +26,7 @@
 
     <section class="projection-center">
         <div>
-            <span class="badge badge-live">{{ $state['eventStatus'] === 'Paused' ? 'Evento en pausa' : ($state['presentationStatus'] === 'VotingOpen' ? 'Votación abierta' : ($state['presentationStatus'] === 'OnStage' ? 'Equipo activo en escenario' : 'En espera')) }}</span>
+            <span class="badge badge-live">Ronda {{ $state['roundNumber'] }} · {{ $state['eventStatus'] === 'Paused' ? 'Evento en pausa' : ($state['presentationStatus'] === 'VotingOpen' ? 'Votación abierta' : ($state['presentationStatus'] === 'OnStage' ? 'Equipo activo en escenario' : 'En espera')) }}</span>
             <h1>{{ $state['participantName'] ?: $event->name }}</h1>
             <h2>{{ $state['projectTitle'] ?: 'La próxima presentación comenzará en breve' }}</h2>
             @if($state['presentationId'])<x-participant-details :participant="$state" dark />@endif

@@ -87,6 +87,7 @@ Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::post('/admin/votantes/{voter}/estado', [AdminController::class, 'changeVoterStatus'])->name('admin.voters.status');
     Route::post('/admin/votacion/pesos', [AdminController::class, 'saveWeights'])->name('admin.voting.weights');
     Route::post('/admin/eventos/{event}/votacion/rubrica', [AdminController::class, 'saveRubric'])->name('admin.voting.rubric');
+    Route::post('/admin/eventos/{event}/votacion/rubrica/importar', [AdminController::class, 'importRubric'])->name('admin.voting.rubric.import');
     Route::post('/admin/votos/{vote}/invalidar', [AdminController::class, 'invalidateVote'])->name('admin.votes.invalidate');
 });
 

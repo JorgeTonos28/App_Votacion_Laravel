@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\JurorAccessMail;
+use App\Models\Criterion;
 use App\Models\Juror;
 use App\Models\Participant;
 use App\Models\User;
@@ -15,6 +16,7 @@ use App\Services\ResultService;
 use App\Services\VoteService;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -355,6 +357,65 @@ class VotingPlatformTest extends TestCase
             ->assertSee('Ada Lovelace')
             ->assertSee('Linus Torvalds')
             ->assertSee('Tecnología educativa');
+    }
+
+    public function test_admin_can_import_complete_rubrics_and_see_csv_hints(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with('groups')->where('code', 'BTP726')->firstOrFail();
+        $jury = $event->groups->firstWhere('role_type', 'Jury');
+        $csv = implode("\n", [
+            'nombre,descripcion,peso,escala_minima,escala_maxima,etiqueta_minima,etiqueta_maxima,comentario,respuesta_obligatoria,ayuda_para_evaluar',
+            'Impacto,Valor generado,60,1,10,Bajo,Alto,Required,Sí,Coteja alcance y evidencia',
+            'Viabilidad,Posibilidad de ejecución,40,0,5,Débil,Sólida,Optional,No,Valida recursos y tiempo',
+        ]);
+
+        $this->actingAs($admin)->get(route('admin.voting', $event))
+            ->assertOk()
+            ->assertSee('Ver estructura CSV')
+            ->assertSee('ayuda_para_evaluar');
+        $this->actingAs($admin)->get(route('admin.participants', $event))->assertSee('Ver estructura CSV');
+        $this->actingAs($admin)->get(route('admin.voters', $event))->assertSee('Ver estructura CSV');
+
+        $this->actingAs($admin)->post(route('admin.voting.rubric.import', $event), [
+            'voting_group_id' => $jury->id,
+            'csv' => UploadedFile::fake()->createWithContent('rubrica.csv', $csv),
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $criteria = Criterion::query()->where('voting_group_id', $jury->id)->orderBy('sort_order')->get();
+        $this->assertCount(2, $criteria);
+        $this->assertSame('Impacto', $criteria[0]->name);
+        $this->assertEquals(.6, $criteria[0]->weight);
+        $this->assertEquals(10, $criteria[0]->scale_max);
+        $this->assertSame('Bajo', $criteria[0]->minimum_label);
+        $this->assertSame('Required', $criteria[0]->comment_mode);
+        $this->assertTrue($criteria[0]->required);
+        $this->assertSame('Coteja alcance y evidencia', $criteria[0]->help_text);
+        $this->assertFalse($criteria[1]->required);
+    }
+
+    public function test_rubric_csv_can_omit_optional_columns_and_distributes_weight(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with('groups')->where('code', 'BTP726')->firstOrFail();
+        $public = $event->groups->firstWhere('role_type', 'Public');
+        $csv = "nombre;descripcion\nInnovación;Qué tan novedosa es\nPresentación;Claridad del equipo";
+
+        $this->actingAs($admin)->post(route('admin.voting.rubric.import', $event), [
+            'voting_group_id' => $public->id,
+            'csv' => UploadedFile::fake()->createWithContent('rubrica.csv', $csv),
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $criteria = Criterion::query()->where('voting_group_id', $public->id)->orderBy('sort_order')->get();
+        $this->assertCount(2, $criteria);
+        foreach ($criteria as $criterion) {
+            $this->assertEquals(.5, $criterion->weight);
+            $this->assertEquals(1, $criterion->scale_min);
+            $this->assertEquals(5, $criterion->scale_max);
+            $this->assertSame('Hidden', $criterion->comment_mode);
+            $this->assertTrue($criterion->required);
+            $this->assertNull($criterion->help_text);
+        }
     }
 
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array

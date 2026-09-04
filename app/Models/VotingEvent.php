@@ -16,7 +16,7 @@ class VotingEvent extends Model
     protected $guarded = [];
 
     protected $casts = [
-        'starts_at' => 'datetime', 'ends_at' => 'datetime', 'archived_at' => 'datetime',
+        'starts_at' => 'datetime', 'ends_at' => 'datetime', 'archived_at' => 'datetime', 'current_round' => 'integer',
         'allow_public_vote_edit' => 'boolean', 'allow_juror_vote_edit' => 'boolean',
         'require_quorum_to_publish' => 'boolean',
     ];
@@ -38,7 +38,12 @@ class VotingEvent extends Model
 
     public function presentations(): HasMany
     {
-        return $this->hasMany(Presentation::class, 'event_id')->orderBy('sequence');
+        return $this->hasMany(Presentation::class, 'event_id')->where('round_number', $this->current_round)->orderBy('sequence');
+    }
+
+    public function allPresentations(): HasMany
+    {
+        return $this->hasMany(Presentation::class, 'event_id')->orderBy('round_number')->orderBy('sequence');
     }
 
     public function jurors(): HasMany

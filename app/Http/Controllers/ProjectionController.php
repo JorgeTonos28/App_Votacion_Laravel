@@ -16,6 +16,9 @@ class ProjectionController extends Controller
     public function live(string $eventCode)
     {
         $event = $this->event($eventCode);
+        if ($event->status === 'Published') {
+            return redirect()->route('projection.ranking', $event->code);
+        }
         $state = $this->queries->liveStateByCode($event->code);
 
         return view('projection.live', compact('event', 'state'));

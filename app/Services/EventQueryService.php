@@ -80,7 +80,7 @@ class EventQueryService
         $timer = $this->timer($event, $presentation);
 
         return [
-            'eventId' => $event->id, 'eventCode' => $event->code, 'eventName' => $event->name, 'eventStatus' => $event->status,
+            'eventId' => $event->id, 'eventCode' => $event->code, 'eventName' => $event->name, 'eventStatus' => $event->status, 'roundNumber' => $event->current_round,
             'presentationId' => $presentation?->id, 'presentationStatus' => $presentation?->status,
             'participantName' => $participant?->name, 'projectTitle' => $participant?->project_title,
             'participantNumber' => $participant?->number, 'participantMembers' => $participant?->member_names ?? [],

@@ -73,6 +73,6 @@ class Participant extends Model
 
     public function presentation(): HasOne
     {
-        return $this->hasOne(Presentation::class);
+        return $this->hasOne(Presentation::class)->ofMany('round_number', 'max');
     }
 }
