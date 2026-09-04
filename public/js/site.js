@@ -393,6 +393,180 @@
         });
     }
 
+    // Generic Modal Open/Close
+    document.querySelectorAll("[data-modal-open]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const modalId = btn.dataset.modalOpen;
+            const modal = document.getElementById(modalId);
+            if (modal) modal.style.display = "flex";
+        });
+    });
+
+    document.querySelectorAll("[data-modal-close]").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const modalId = btn.dataset.modalClose;
+            const modal = document.getElementById(modalId);
+            if (modal) modal.style.display = "none";
+        });
+    });
+
+    document.querySelectorAll(".modal-backdrop").forEach(backdrop => {
+        backdrop.addEventListener("click", e => {
+            if (e.target === backdrop) backdrop.style.display = "none";
+        });
+    });
+
+    document.addEventListener("keydown", e => {
+        if (e.key === "Escape") {
+            document.querySelectorAll(".modal-backdrop").forEach(m => m.style.display = "none");
+            const sm = document.querySelector("[data-switcher-menu]");
+            if (sm) sm.style.display = "none";
+        }
+    });
+
+    // Team details modal for public & jury lobbies
+    document.querySelectorAll("[data-team-modal]").forEach(elem => {
+        elem.addEventListener("click", e => {
+            e.stopPropagation();
+            try {
+                const data = JSON.parse(elem.dataset.teamModal);
+                const modal = document.getElementById("public-team-modal");
+                if (!modal) return;
+                const nameEl = document.getElementById("modal-team-name");
+                const numEl = document.getElementById("modal-team-number");
+                const projEl = document.getElementById("modal-team-project");
+                const areaEl = document.getElementById("modal-team-area");
+                const descEl = document.getElementById("modal-team-desc");
+                if (nameEl) nameEl.textContent = data.name || "Equipo";
+                if (numEl) numEl.textContent = `#${data.number || 1}`;
+                if (projEl) projEl.textContent = data.project || "Propuesta de innovación";
+                if (areaEl) areaEl.textContent = data.area || "General";
+                if (descEl) descEl.textContent = data.description || "Sin descripción.";
+
+                const membersBox = document.getElementById("modal-team-members-box");
+                const membersList = document.getElementById("modal-team-members-list");
+                if (membersList && membersBox) {
+                    membersList.innerHTML = "";
+                    if (data.members && data.members.length) {
+                        membersBox.style.display = "block";
+                        data.members.forEach(m => {
+                            const li = document.createElement("li");
+                            li.textContent = m;
+                            membersList.appendChild(li);
+                        });
+                    } else {
+                        membersBox.style.display = "none";
+                    }
+                }
+                modal.style.display = "flex";
+            } catch (err) {
+                console.error("Error parsing team modal data", err);
+            }
+        });
+    });
+
+    // Juror participation history modal
+    document.querySelectorAll("[data-view-history]").forEach(elem => {
+        elem.addEventListener("click", e => {
+            e.stopPropagation();
+            try {
+                const history = JSON.parse(elem.dataset.viewHistory || "[]");
+                const jurorName = elem.dataset.jurorName || elem.closest("tr")?.querySelector(".table-title")?.textContent?.trim() || "Jurado";
+                const modal = document.getElementById("juror-history-modal");
+                const title = document.getElementById("history-modal-title");
+                const tbody = document.getElementById("history-modal-body");
+                if (!modal || !tbody) return;
+
+                if (title) title.textContent = `Historial de Participación · ${jurorName}`;
+                tbody.innerHTML = "";
+
+                if (!history.length) {
+                    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 24px; color: var(--text-muted);">Sin asignaciones registradas.</td></tr>`;
+                } else {
+                    history.forEach(h => {
+                        const tr = document.createElement("tr");
+                        tr.innerHTML = `
+                            <td><strong>${h.eventName}</strong></td>
+                            <td><code>${h.eventCode}</code></td>
+                            <td><small>Peso ${h.weight}</small></td>
+                            <td><span class="badge ${h.jurorStatus === 'Active' ? 'badge-success' : 'badge-muted'}">${h.jurorStatus === 'Active' ? 'Activo' : 'Inactivo'}</span></td>
+                            <td><small class="table-subtitle">${h.createdAt}</small></td>
+                            <td style="text-align: right;">
+                                <a class="button button-sm button-ghost" href="${h.eventUrl}" title="Ver jurados del evento">
+                                    <span class="material-symbols-outlined" style="font-size: 16px;">launch</span>
+                                </a>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+                modal.style.display = "flex";
+            } catch (err) {
+                console.error("Error viewing juror history", err);
+            }
+        });
+    });
+
+    // Global Juror search filter
+    const jurorSearch = document.querySelector("[data-juror-search]");
+    if (jurorSearch) {
+        const rows = [...document.querySelectorAll("[data-juror-row]")];
+        const count = document.querySelector("[data-jurors-count]");
+        jurorSearch.addEventListener("input", () => {
+            const term = jurorSearch.value.trim().toLowerCase();
+            let visible = 0;
+            rows.forEach(r => {
+                const matches = !term ||
+                    (r.dataset.name && r.dataset.name.includes(term)) ||
+                    (r.dataset.email && r.dataset.email.includes(term)) ||
+                    (r.dataset.title && r.dataset.title.includes(term));
+                r.hidden = !matches;
+                if (matches) visible++;
+            });
+            if (count) count.textContent = `${visible} jurados mostrados`;
+        });
+    }
+
+    // Contextual Event Switcher Dropdown
+    const switcherToggle = document.querySelector("[data-switcher-toggle]");
+    const switcherMenu = document.querySelector("[data-switcher-menu]");
+    if (switcherToggle && switcherMenu) {
+        switcherToggle.addEventListener("click", e => {
+            e.stopPropagation();
+            const isOpen = switcherMenu.style.display === "block";
+            switcherMenu.style.display = isOpen ? "none" : "block";
+        });
+        document.addEventListener("click", e => {
+            if (!e.target.closest("[data-event-switcher]")) {
+                switcherMenu.style.display = "none";
+            }
+        });
+    }
+
+    // Live Metrics Polling for Admin Dashboard
+    const liveMetricsContainer = document.querySelector("[data-live-metrics-url]");
+    if (liveMetricsContainer) {
+        const metricsUrl = liveMetricsContainer.dataset.liveMetricsUrl;
+        const pollMetrics = async () => {
+            try {
+                const res = await fetch(metricsUrl, { headers: { Accept: "application/json" }, cache: "no-store" });
+                const json = await res.json();
+                if (res.ok && json.ok && json.data) {
+                    const d = json.data;
+                    const update = (key, val) => {
+                        const el = document.querySelector(`[data-metric="${key}"]`);
+                        if (el) el.textContent = typeof val === "number" ? val.toLocaleString() : val;
+                    };
+                    update("activeEvents", d.activeEvents);
+                    update("connectedUsers", d.connectedUsers);
+                    update("totalVotes", d.totalVotes);
+                    update("activeJurors", d.activeJurors);
+                }
+            } catch {}
+        };
+        window.setInterval(pollMetrics, 6000);
+    }
+
     window.setTimeout(() => {
         document.querySelectorAll(".toast").forEach(toast => toast.classList.add("toast-hidden"));
     }, 4500);

@@ -18,12 +18,13 @@ class PublicController extends Controller
     {
         $session = $this->current($request);
         $state = $this->queries->liveState($session);
-        $event = VotingEvent::query()->with('branding')->findOrFail($session['eventId']);
+        $event = VotingEvent::query()->with(['branding', 'participants'])->findOrFail($session['eventId']);
         if ($state['eventStatus'] === 'Published') {
             return redirect()->to(route('projection.ranking', $event->code).'?transition=lobby');
         }
+        $participants = $event->participants->sortBy('presentation_order')->values();
 
-        return view('public.lobby', compact('session', 'state', 'event'));
+        return view('public.lobby', compact('session', 'state', 'event', 'participants'));
     }
 
     public function ballot(Request $request)

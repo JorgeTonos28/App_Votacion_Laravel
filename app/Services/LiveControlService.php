@@ -22,6 +22,8 @@ class LiveControlService
             'pause' => $this->pause($eventId, $actorId),
             'resume' => $this->resume($eventId, $actorId),
             'finish' => $this->finish($eventId, $actorId),
+            'reset_turn' => $this->resetPresentationTurn($eventId, (string) $presentationId, $actorId),
+            'add_time' => $this->addPresentationTime($eventId, (string) $presentationId, 60, $actorId),
             default => throw new DomainException('INVALID_OPERATION', 'La operación no es válida.'),
         };
     }
@@ -158,6 +160,62 @@ class LiveControlService
         }
         $event->update(['active_presentation_id' => null, 'status' => 'Finished']);
         $this->audit->write($eventId, 'Operator', $actorId, 'EVENT_FINISHED', 'Event', $eventId);
+    }
+
+    public function resetPresentationTurn(string $eventId, string $presentationId, string $actorId): void
+    {
+        DB::transaction(function () use ($eventId, $presentationId, $actorId) {
+            $event = VotingEvent::query()->with('presentations')->lockForUpdate()->find($eventId);
+            if (! $event) {
+                throw $this->notFound();
+            }
+            $presentation = $event->presentations->firstWhere('id', $presentationId);
+            if (! $presentation) {
+                throw new DomainException('PRESENTATION_NOT_FOUND', 'No encontramos la presentación.', 404);
+            }
+            if ($presentation->status === 'Disqualified') {
+                throw new DomainException('PARTICIPANT_DISQUALIFIED', 'El equipo está inhabilitado.', 409);
+            }
+            $previous = $presentation->status;
+            DB::table('votes')->where('presentation_id', $presentation->id)->delete();
+
+            $presentation->update([
+                'status' => 'Pending',
+                'stage_started_at' => null,
+                'stage_ended_at' => null,
+                'voting_opened_at' => null,
+                'voting_closed_at' => null,
+                'timer_paused_at' => null,
+                'paused_timer_seconds' => 0,
+                'version' => $presentation->version + 1,
+            ]);
+
+            if ($event->active_presentation_id === $presentationId) {
+                $event->update([
+                    'active_presentation_id' => null,
+                    'status' => 'Live',
+                ]);
+            }
+
+            $this->audit->write($eventId, 'Operator', $actorId, 'PRESENTATION_TURN_RESET', 'Presentation', $presentationId, $previous, 'Pending');
+        });
+    }
+
+    public function addPresentationTime(string $eventId, string $presentationId, int $seconds, string $actorId): void
+    {
+        $event = VotingEvent::query()->with('presentations')->find($eventId);
+        if (! $event) {
+            throw $this->notFound();
+        }
+        $presentation = $event->presentations->firstWhere('id', $presentationId);
+        if (! $presentation || ! in_array($presentation->status, ['OnStage', 'VotingOpen'], true)) {
+            throw new DomainException('INVALID_TRANSITION', 'Solo se puede agregar tiempo a un turno activo o en votación.', 409);
+        }
+        $presentation->update([
+            'paused_timer_seconds' => $presentation->paused_timer_seconds + max(1, $seconds),
+            'version' => $presentation->version + 1,
+        ]);
+        $this->audit->write($eventId, 'Operator', $actorId, 'PRESENTATION_TIME_ADDED', 'Presentation', $presentationId, null, ['added_seconds' => $seconds]);
     }
 
     private function changeStatus(string $eventId, array $allowed, string $target, string $action, string $actorId): void

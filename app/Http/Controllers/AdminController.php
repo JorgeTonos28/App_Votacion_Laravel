@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DomainException;
 use App\Mail\JurorAccessMail;
+use App\Mail\UserInvitationMail;
 use App\Models\AppSetting;
 use App\Models\AuditEntry;
 use App\Models\Criterion;
@@ -31,7 +32,9 @@ use App\Support\Domain;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminController extends Controller
@@ -50,9 +53,33 @@ class AdminController extends Controller
     public function index()
     {
         $events = $this->eventDirectory();
-        $metrics = ['activeEvents' => $events->whereIn('status', ['Live', 'LobbyOpen', 'Paused'])->count(), 'upcomingEvents' => $events->where('status', 'Scheduled')->count(), 'finishedEvents' => $events->whereIn('status', ['Finished', 'Published'])->count(), 'totalVotes' => Vote::query()->where('status', '!=', 'Invalidated')->count(), 'activeJurors' => Juror::query()->where('status', 'Active')->count(), 'connectedUsers' => EventSession::query()->whereNull('revoked_at')->where('expires_at', '>', now())->count(), 'totalParticipants' => Participant::query()->count()];
+        $metrics = [
+            'activeEvents' => $events->whereIn('status', ['Live', 'LobbyOpen', 'Paused'])->count(),
+            'upcomingEvents' => $events->where('status', 'Scheduled')->count(),
+            'finishedEvents' => $events->whereIn('status', ['Finished', 'Published'])->count(),
+            'totalVotes' => Vote::query()->where('status', '!=', 'Invalidated')->count(),
+            'activeJurors' => Juror::query()->where('status', 'Active')->count(),
+            'connectedUsers' => EventSession::query()->whereNull('revoked_at')->where('last_seen_at', '>=', now()->subMinutes(3))->count(),
+            'totalParticipants' => Participant::query()->count(),
+        ];
 
         return view('admin.index', compact('events', 'metrics'));
+    }
+
+    public function liveMetrics()
+    {
+        $events = $this->eventDirectory();
+        $metrics = [
+            'activeEvents' => $events->whereIn('status', ['Live', 'LobbyOpen', 'Paused'])->count(),
+            'upcomingEvents' => $events->where('status', 'Scheduled')->count(),
+            'finishedEvents' => $events->whereIn('status', ['Finished', 'Published'])->count(),
+            'totalVotes' => Vote::query()->where('status', '!=', 'Invalidated')->count(),
+            'activeJurors' => Juror::query()->where('status', 'Active')->count(),
+            'connectedUsers' => EventSession::query()->whereNull('revoked_at')->where('last_seen_at', '>=', now()->subMinutes(3))->count(),
+            'totalParticipants' => Participant::query()->count(),
+        ];
+
+        return $this->envelope($metrics);
     }
 
     public function projects()
@@ -85,7 +112,39 @@ class AdminController extends Controller
             ->sortBy('name')
             ->values();
 
-        return view('admin.all-jurors', compact('jurors'));
+        $events = VotingEvent::query()->whereNotIn('status', ['Archived'])->orderByDesc('created_at')->get(['id', 'name', 'code', 'status']);
+
+        return view('admin.all-jurors', compact('jurors', 'events'));
+    }
+
+    public function addGlobalJuror(Request $request)
+    {
+        $data = $request->validate([
+            'event_id' => 'required|uuid|exists:events,id',
+            'name' => 'required|string|max:180',
+            'title' => 'nullable|string|max:180',
+            'email' => 'nullable|email|max:254',
+            'individual_weight' => 'required|numeric|min:.1|max:10',
+        ]);
+        $event = VotingEvent::query()->findOrFail($data['event_id']);
+        $code = Domain::jurorCode();
+        $juror = Juror::query()->create([
+            'event_id' => $event->id,
+            'name' => trim($data['name']),
+            'title' => trim($data['title'] ?? '') ?: null,
+            'email' => trim($data['email'] ?? '') ?: null,
+            'individual_weight' => $data['individual_weight'],
+            'code_hash' => Domain::hashSecret($code),
+            'expires_at' => now()->addYear(),
+        ]);
+        $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'JUROR_CREATED_GLOBAL', 'Juror', $juror->id, newValue: ['name' => $juror->name, 'event' => $event->name]);
+        $accessUrl = $this->jurorAccessUrl($event, $code);
+        $emailSent = $this->sendJurorAccess($juror, $event, $code, $accessUrl);
+
+        return back()
+            ->with('issuedJuror', $this->issuedJurorPayload($juror, $event, $code, $accessUrl, $emailSent))
+            ->with('issuedJurorCode', "{$juror->name}: {$code}")
+            ->with('success', $this->jurorIssuedMessage($emailSent));
     }
 
     public function allResults()
@@ -100,11 +159,109 @@ class AdminController extends Controller
 
     public function settings()
     {
-        $metrics = ['administrators' => User::query()->where('role', 'Administrator')->count(), 'operators' => User::query()->where('role', 'Operator')->count(), 'mfa' => User::query()->where('two_factor_enabled', true)->count()];
-        $templates = EventTemplate::query()->where('active', true)->orderBy('name')->get();
-        $settings = AppSetting::query()->orderBy('key')->get();
+        $users = User::query()->orderBy('name')->get();
+        $metrics = [
+            'administrators' => $users->where('role', 'Administrator')->count(),
+            'operators' => $users->where('role', 'Operator')->count(),
+            'auditors' => $users->where('role', 'Auditor')->count(),
+            'mfa' => $users->where('two_factor_enabled', true)->count(),
+            'total' => $users->count(),
+        ];
+        $specs = [
+            'php' => PHP_VERSION,
+            'laravel' => app()->version(),
+            'database' => config('database.default'),
+            'environment' => app()->environment(),
+            'timezone' => config('app.timezone'),
+            'cache' => config('cache.default'),
+            'session' => config('session.driver'),
+            'max_execution_time' => ini_get('max_execution_time').'s',
+            'memory_limit' => ini_get('memory_limit'),
+        ];
 
-        return view('admin.settings', compact('metrics', 'templates', 'settings'));
+        return view('admin.settings', compact('users', 'metrics', 'specs'));
+    }
+
+    public function createUser(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:180',
+            'email' => 'required|email|max:254|unique:users,email',
+            'role' => 'required|in:Administrator,Operator,Auditor',
+        ], [
+            'name.required' => 'Ingresa el nombre del colaborador.',
+            'email.required' => 'Ingresa el correo electrónico.',
+            'email.unique' => 'Este correo ya tiene un usuario registrado.',
+            'role.required' => 'Selecciona un rol.',
+        ]);
+
+        $token = Str::random(64);
+        $user = User::query()->create([
+            'name' => trim($data['name']),
+            'email' => trim(strtolower($data['email'])),
+            'role' => $data['role'],
+            'password' => Hash::make(Str::random(32)),
+            'invitation_token' => $token,
+            'invitation_expires_at' => now()->addDays(3),
+            'status' => 'Pending',
+        ]);
+
+        $activationUrl = route('auth.invitation.accept', ['token' => $token]);
+        $emailSent = false;
+        try {
+            Mail::to($user->email)->send(new UserInvitationMail($user, $activationUrl));
+            $emailSent = true;
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        $this->audit->write(null, 'Administrator', (string) $request->user()->id, 'USER_INVITED', 'User', $user->id, newValue: ['name' => $user->name, 'email' => $user->email, 'role' => $user->role]);
+
+        $msg = $emailSent
+            ? "Invitación enviada a {$user->email} con enlace de activación."
+            : "Usuario registrado. Correo no enviado automáticamente. Comparte este enlace de activación: {$activationUrl}";
+
+        return back()->with('success', $msg)->with('invitationUrl', $activationUrl);
+    }
+
+    public function resendInvitation(Request $request, User $user)
+    {
+        $token = Str::random(64);
+        $user->update([
+            'invitation_token' => $token,
+            'invitation_expires_at' => now()->addDays(3),
+            'status' => 'Pending',
+        ]);
+
+        $activationUrl = route('auth.invitation.accept', ['token' => $token]);
+        $emailSent = false;
+        try {
+            Mail::to($user->email)->send(new UserInvitationMail($user, $activationUrl));
+            $emailSent = true;
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        $this->audit->write(null, 'Administrator', (string) $request->user()->id, 'USER_INVITATION_RESENT', 'User', $user->id);
+
+        $msg = $emailSent
+            ? "Invitación reenviada a {$user->email}."
+            : "Invitación renovada. Enlace de activación: {$activationUrl}";
+
+        return back()->with('success', $msg)->with('invitationUrl', $activationUrl);
+    }
+
+    public function toggleUserStatus(Request $request, User $user)
+    {
+        if ($user->id === $request->user()->id) {
+            return back()->with('error', 'No puedes desactivar tu propia cuenta de usuario.');
+        }
+
+        $newStatus = $user->status === 'Active' ? 'Inactive' : 'Active';
+        $user->update(['status' => $newStatus]);
+        $this->audit->write(null, 'Administrator', (string) $request->user()->id, 'USER_STATUS_TOGGLED', 'User', $user->id, ['status' => $user->status], ['status' => $newStatus]);
+
+        return back()->with('success', "Estado del usuario actualizado a ".($newStatus === 'Active' ? 'Activo' : 'Inactivo').'.');
     }
 
     public function create()
@@ -677,18 +834,43 @@ class AdminController extends Controller
 
     public function control(Request $request, VotingEvent $event, string $operation)
     {
-        if (strtolower($operation) === 'restart') {
-            $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
-            $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
-            if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
-                $this->results->calculate($event->id, (string) $request->user()->id);
-            }
-            $round = $this->rounds->restart($event->id, (string) $request->user()->id);
+        $op = strtolower($operation);
 
-            return back()->with('success', "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.");
+        if ($op === 'restart') {
+            $mode = $request->input('round_mode', 'next_round');
+            if ($mode === 'next_round') {
+                $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
+                $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
+                if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
+                    $this->results->calculate($event->id, (string) $request->user()->id);
+                }
+            }
+            $round = $this->rounds->restart($event->id, (string) $request->user()->id, $mode);
+
+            $msg = $mode === 'same_round'
+                ? "La ronda {$round} se reinició desde cero para todos los equipos."
+                : "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.";
+
+            return back()->with('success', $msg);
         }
+
+        if ($op === 'reset_turn') {
+            $presentationId = (string) $request->input('presentation_id');
+            $this->liveControl->resetPresentationTurn($event->id, $presentationId, (string) $request->user()->id);
+
+            return back()->with('success', 'El turno del equipo fue reiniciado a Pendiente.');
+        }
+
+        if ($op === 'add_time') {
+            $presentationId = (string) $request->input('presentation_id');
+            $seconds = (int) $request->input('seconds', 60);
+            $this->liveControl->addPresentationTime($event->id, $presentationId, $seconds, (string) $request->user()->id);
+
+            return back()->with('success', "+{$seconds}s añadidos al turno actual.");
+        }
+
         $this->liveControl->operate($event->id, $operation, (string) $request->user()->id, $request->input('participant_id'), $request->input('presentation_id'), $request->input('reason'));
-        if (in_array(strtolower($operation), ['close', 'finish'], true)) {
+        if (in_array($op, ['close', 'finish'], true)) {
             $this->results->calculate($event->id, (string) $request->user()->id);
         }
 

@@ -38,9 +38,15 @@ Route::post('/admin/acceso', [AccountController::class, 'authenticate'])->middle
 Route::get('/admin/verificar', [AccountController::class, 'verify'])->name('admin.verify');
 Route::post('/admin/verificar', [AccountController::class, 'verifyCode'])->middleware('throttle:8,15')->name('admin.verify.submit');
 Route::get('/admin/sin-permiso', [AccountController::class, 'denied'])->name('admin.denied');
+Route::get('/activar/{token}', [AccountController::class, 'showSetupPassword'])->name('auth.invitation.accept');
+Route::post('/activar/{token}', [AccountController::class, 'setupPassword'])->name('auth.invitation.setup');
 
 Route::middleware(['auth', 'role:Administrator,Operator'])->group(function () {
     Route::get('/admin', [AdminController::class, 'index'])->name('admin.index');
+    Route::get('/admin/perfil', [AccountController::class, 'profile'])->name('admin.profile');
+    Route::post('/admin/perfil', [AccountController::class, 'updateProfile'])->name('admin.profile.update');
+    Route::post('/admin/perfil/contrasena', [AccountController::class, 'changePassword'])->name('admin.profile.password');
+    Route::get('/api/admin/metricas-en-vivo', [AdminController::class, 'liveMetrics'])->name('admin.metrics.live');
     Route::get('/admin/proyectos', [AdminController::class, 'projects'])->name('admin.projects');
     Route::get('/admin/jurados', [AdminController::class, 'allJurors'])->name('admin.jurors.all');
     Route::get('/admin/resultados', [AdminController::class, 'allResults'])->name('admin.results.all');
@@ -62,8 +68,13 @@ Route::middleware(['auth', 'role:Administrator,Operator'])->group(function () {
 
 Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::get('/admin/configuracion', [AdminController::class, 'settings'])->name('admin.settings');
+    Route::post('/admin/usuarios', [AdminController::class, 'createUser'])->name('admin.users.create');
+    Route::post('/admin/usuarios/{user}/reenviar-invitacion', [AdminController::class, 'resendInvitation'])->name('admin.users.resend');
+    Route::post('/admin/usuarios/{user}/estado', [AdminController::class, 'toggleUserStatus'])->name('admin.users.toggle-status');
     Route::get('/admin/seguridad/mfa', [AccountController::class, 'mfa'])->name('admin.mfa');
     Route::post('/admin/seguridad/mfa', [AccountController::class, 'enableMfa'])->name('admin.mfa.enable');
+    Route::post('/admin/seguridad/mfa/desactivar', [AccountController::class, 'disableMfa'])->name('admin.mfa.disable');
+    Route::post('/admin/jurados/global/agregar', [AdminController::class, 'addGlobalJuror'])->name('admin.jurors.global.add');
     Route::get('/admin/eventos/nuevo', [AdminController::class, 'create'])->name('admin.events.create');
     Route::post('/admin/eventos/nuevo', [AdminController::class, 'store'])->name('admin.events.store');
     Route::get('/admin/eventos/{event}/editar', [AdminController::class, 'edit'])->name('admin.events.edit');
