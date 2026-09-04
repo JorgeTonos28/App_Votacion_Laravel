@@ -141,6 +141,7 @@
         const duration = Number(resultsGate.dataset.resultsDuration || 30000);
         const stateEndpoint = resultsGate.dataset.resultsState;
         const isPublished = resultsGate.dataset.resultsPublished === "true";
+        const forceAnimation = resultsGate.dataset.resultsForceAnimation === "true";
         const revealKey = `innovamente-results:${resultsGate.dataset.eventCode}:round-${resultsGate.dataset.roundNumber}`;
         const publishedContent = resultsGate.querySelector(".results-published-content");
         const stageLabel = resultsGate.querySelector("[data-results-stage]");
@@ -178,7 +179,7 @@
         };
 
         if (isPublished) {
-            if (storage.get(revealKey) === "revealed") reveal();
+            if (!forceAnimation && storage.get(revealKey) === "revealed") reveal();
             else calculate(false);
         } else {
             storage.remove(revealKey);
@@ -209,7 +210,7 @@
                 if (!envelope.ok) return;
                 const state = envelope.data;
                 if (liveRoot.dataset.resultsRedirect && state.eventStatus === "Published") {
-                    window.location.assign(liveRoot.dataset.resultsRedirect);
+                    window.location.replace(liveRoot.dataset.resultsRedirect);
                     return;
                 }
                 const next = [

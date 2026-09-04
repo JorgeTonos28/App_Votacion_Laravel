@@ -8,7 +8,7 @@
 @endphp
 
 @section('content')
-<main class="projection-stage" data-live-poll="{{ route('projection.state', $event->code) }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}" data-poll-interval="3000" data-juror-total="{{ $state['jurorTotal'] }}" data-state="{{ $fingerprint }}">
+<main class="projection-stage" data-live-poll="{{ route('projection.state', $event->code) }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}?transition=projection" data-poll-interval="3000" data-juror-total="{{ $state['jurorTotal'] }}" data-state="{{ $fingerprint }}">
     <section class="projection-join">
         <span class="eyebrow">Código del evento</span>
         <div class="event-code">{{ $event->code }}</div>

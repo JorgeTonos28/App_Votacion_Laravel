@@ -311,7 +311,8 @@ class VotingPlatformTest extends TestCase
             ->assertOk()
             ->assertSee('Entrar a votar')
             ->assertSee('Acceso de jurados')
-            ->assertSee('data-results-redirect', false);
+            ->assertSee('data-results-redirect', false)
+            ->assertSee('transition=projection', false);
         $event->update(['require_quorum_to_publish' => false]);
         app(ResultService::class)->calculate($event->id, $actorId);
         app(ResultService::class)->publish($event->id, $actorId);
@@ -324,10 +325,17 @@ class VotingPlatformTest extends TestCase
             ->assertSee('Preparando los resultados')
             ->assertSee('data-results-duration="30000"', false)
             ->assertSee('data-results-published="true"', false)
+            ->assertSee('data-results-force-animation="false"', false)
             ->assertSee('Podio de ganadores')
             ->assertSee('Rendimiento por equipo')
             ->assertSee('ranking-bar-row', false)
             ->assertSee('Desglose completo');
+
+        $this->get(route('projection.ranking', $event->code).'?transition=projection')
+            ->assertOk()
+            ->assertSee('is-calculating', false)
+            ->assertSee('data-results-force-animation="true"', false)
+            ->assertSee('Preparando los resultados');
 
         $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
         $this->actingAs($admin)->get(route('admin.live', $event))

@@ -11,7 +11,7 @@
 @endphp
 
 @section('content')
-<main class="ranking-stage results-gate {{ $published ? 'is-calculating' : 'is-waiting' }}" data-results-gate data-results-published="{{ $published ? 'true' : 'false' }}" data-results-state="{{ route('projection.state', $event->code) }}" data-results-duration="30000" data-event-code="{{ $event->code }}" data-round-number="{{ $state['roundNumber'] }}">
+<main class="ranking-stage results-gate {{ $published ? 'is-calculating' : 'is-waiting' }}" data-results-gate data-results-published="{{ $published ? 'true' : 'false' }}" data-results-force-animation="{{ request()->query('transition') === 'projection' ? 'true' : 'false' }}" data-results-state="{{ route('projection.state', $event->code) }}" data-results-duration="30000" data-event-code="{{ $event->code }}" data-round-number="{{ $state['roundNumber'] }}">
     <div class="ranking-orb ranking-orb-one"></div>
     <div class="ranking-orb ranking-orb-two"></div>
     <div class="ranking-watermark">INNOVAMENTE</div>
