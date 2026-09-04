@@ -920,6 +920,47 @@ class VotingPlatformTest extends TestCase
         $this->assertTrue(\App\Models\EventTemplate::query()->where('name', 'Copia de Pitch Competition')->exists());
     }
 
+    public function test_jury_dashboard_and_ballot_render_timer_when_presentation_is_active(): void
+    {
+        $event = VotingEvent::query()->with(['presentations', 'jurors'])->where('code', 'BTP726')->firstOrFail();
+        $juror = $event->jurors->firstOrFail();
+        $presentation = $event->presentations->firstOrFail();
+
+        // 1. Iniciar presentación (OnStage)
+        $control = app(LiveControlService::class);
+        $operatorId = (string) Str::uuid();
+        $control->operate($event->id, 'start', $operatorId);
+        $control->operate($event->id, 'presentation', $operatorId, $presentation->participant_id);
+
+        $sessionService = app(\App\Services\EventSessionService::class);
+        [$token] = $sessionService->createJuror($event, $juror, 'Mozilla/5.0');
+
+        // Juror dashboard should render timer-card and data-countdown or paused timer
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.dashboard'))
+            ->assertOk()
+            ->assertSee('timer-card')
+            ->assertSee('Tiempo de exposición / pitch')
+            ->assertSee('data-countdown', false);
+
+        // 2. Abrir votación (VotingOpen)
+        $control->operate($event->id, 'open', $operatorId, presentationId: $presentation->id);
+
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.dashboard'))
+            ->assertOk()
+            ->assertSee('timer-card')
+            ->assertSee('Tiempo restante de votación')
+            ->assertSee('data-countdown', false);
+
+        // Juror ballot should also display timer
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.ballot'))
+            ->assertOk()
+            ->assertSee('data-countdown', false)
+            ->assertSee('Cierra en');
+    }
+
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
     {
         return [
