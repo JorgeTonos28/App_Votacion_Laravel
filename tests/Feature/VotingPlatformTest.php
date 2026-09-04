@@ -789,7 +789,8 @@ class VotingPlatformTest extends TestCase
         ])->assertRedirect()->assertSessionHas('success');
 
         $presentation->refresh();
-        $this->assertSame(60, $presentation->paused_timer_seconds);
+        $this->assertSame(60, $presentation->extra_seconds);
+        $this->assertSame(0, $presentation->paused_timer_seconds);
 
         $this->actingAs($admin)->post(route('admin.control', [$event, 'reset_turn']), [
             'presentation_id' => $presentation->id,
@@ -797,7 +798,37 @@ class VotingPlatformTest extends TestCase
 
         $presentation->refresh();
         $this->assertSame('Pending', $presentation->status);
+        $this->assertSame(0, $presentation->extra_seconds);
         $this->assertNull($event->fresh()->active_presentation_id);
+    }
+
+    public function test_live_control_can_open_voting_when_paused_and_timer_recalculates(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $event = VotingEvent::query()->with(['presentations.participant'])->where('code', 'BTP726')->firstOrFail();
+        $presentation = $event->presentations->first();
+        $actorId = (string) $admin->id;
+        $control = app(LiveControlService::class);
+        $queries = app(\App\Services\EventQueryService::class);
+
+        $control->operate($event->id, 'start', $actorId);
+        $control->operate($event->id, 'presentation', $actorId, $presentation->participant_id);
+        $control->operate($event->id, 'pause', $actorId);
+
+        $event->refresh();
+        $this->assertSame('Paused', $event->status);
+
+        // Can open voting even when paused
+        $control->operate($event->id, 'open', $actorId, presentationId: $presentation->id);
+        $event->refresh();
+        $presentation->refresh();
+        $this->assertSame('Live', $event->status);
+        $this->assertSame('VotingOpen', $presentation->status);
+
+        // Timer is active and has correct voting duration
+        $state = $queries->liveStateByCode($event->code);
+        $this->assertFalse($state['timerIsPaused']);
+        $this->assertSame($event->voting_duration_seconds, $state['timerRemainingSeconds']);
     }
 
     public function test_user_can_update_own_profile_and_change_password(): void

@@ -195,9 +195,9 @@
                 <div class="timer-box accent">
                     <small>{{ $state['presentationStatus'] === 'VotingOpen' ? 'Tiempo de Votación' : 'Tiempo de Exposición' }}</small>
                     @if($state['timerEndsAt'])
-                        <strong data-countdown="{{ $state['timerEndsAt'] }}" style="font-size: 38px;">{{ $timer }}</strong>
+                        <strong data-countdown="{{ $state['timerEndsAt'] }}" data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="{{ $state['timerIsPaused'] ? '1' : '0' }}" style="font-size: 38px;">{{ $timer }}</strong>
                     @else
-                        <strong data-paused-timer style="font-size: 38px;">{{ $timer }}</strong>
+                        <strong data-paused-timer data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="1" style="font-size: 38px;">{{ $timer }}</strong>
                     @endif
                 </div>
             </div>
@@ -291,17 +291,17 @@
                     <h3 style="font-size: 14px; color: var(--text); margin: 0 0 10px;">Estado de Evaluación del Jurado</h3>
                     <div style="display: flex; flex-direction: column; gap: 8px;">
                         @foreach($jurors as $juror)
-                            <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--surface-subtle); border-radius: 6px; font-size: 13px;">
+                            <div data-juror-row="{{ $juror['id'] }}" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--surface-subtle); border-radius: 6px; font-size: 13px;">
                                 <div style="display: flex; align-items: center; gap: 8px;">
-                                    <span class="material-symbols-outlined" style="font-size: 18px; color: {{ $juror['hasVoted'] ? 'var(--success, #16a34a)' : 'var(--text-muted)' }};">
+                                    <span class="material-symbols-outlined juror-status-icon" style="font-size: 18px; color: {{ $juror['hasVoted'] ? 'var(--success, #16a34a)' : 'var(--text-muted)' }};">
                                         {{ $juror['hasVoted'] ? 'check_circle' : 'pending' }}
                                     </span>
                                     <strong style="color: var(--text);">{{ $juror['name'] }}</strong>
                                 </div>
                                 @if($juror['hasVoted'])
-                                    <span class="badge badge-sm badge-success">Voto recibido</span>
+                                    <span class="badge badge-sm badge-success juror-status-badge">Voto recibido</span>
                                 @else
-                                    <span class="badge badge-sm badge-muted">Pendiente</span>
+                                    <span class="badge badge-sm badge-muted juror-status-badge">Pendiente</span>
                                 @endif
                             </div>
                         @endforeach

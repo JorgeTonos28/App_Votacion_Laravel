@@ -26,7 +26,7 @@
     <span class="connection-pill">Conectado</span>
 </header>
 
-<main class="mobile-content" data-live-poll="{{ route('public.state') }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}?transition=lobby" data-poll-interval="4000" data-state="{{ $fingerprint }}">
+<main class="mobile-content" data-live-poll="{{ route('public.state') }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}?transition=lobby" data-poll-interval="3000" data-state="{{ $fingerprint }}">
     <section class="event-heading">
         <h1>{{ $event->name }}</h1>
         <span class="badge {{ $isVotingOpen ? 'badge-live' : 'badge-warning' }}">
@@ -128,9 +128,9 @@
             <section class="card timer-card">
                 <span class="eyebrow">Tiempo de exposición</span>
                 @if($state['timerEndsAt'])
-                    <div class="timer" data-countdown="{{ $state['timerEndsAt'] }}">{{ $timer }}</div>
+                    <div class="timer" data-countdown="{{ $state['timerEndsAt'] }}" data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="{{ $state['timerIsPaused'] ? '1' : '0' }}">{{ $timer }}</div>
                 @else
-                    <div class="timer" data-paused-timer>{{ $timer }}</div>
+                    <div class="timer" data-paused-timer data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="1">{{ $timer }}</div>
                 @endif
                 <p><span class="material-symbols-outlined">schedule</span> La votación se abrirá al finalizar la exposición.</p>
             </section>

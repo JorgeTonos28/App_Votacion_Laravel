@@ -112,17 +112,90 @@
         updateBallotProgress();
     }
 
-    document.querySelectorAll("[data-countdown]").forEach(timer => {
-        const target = new Date(timer.dataset.countdown).getTime();
-        const render = () => {
-            const remaining = Math.max(0, Math.floor((target - Date.now()) / 1000));
-            const minutes = Math.floor(remaining / 60).toString().padStart(2, "0");
-            const seconds = (remaining % 60).toString().padStart(2, "0");
-            timer.textContent = `${minutes}:${seconds}`;
-        };
-        render();
-        window.setInterval(render, 1000);
-    });
+    // ==========================================
+    // Cronómetro Maestro Sincronizado (Master Timer)
+    // ==========================================
+    const formatTimerDisplay = (seconds) => {
+        if (seconds === null || seconds === undefined || isNaN(seconds)) return "--:--";
+        const total = Math.max(0, Math.floor(seconds));
+        const mins = Math.floor(total / 60).toString().padStart(2, "0");
+        const secs = (total % 60).toString().padStart(2, "0");
+        return `${mins}:${secs}`;
+    };
+
+    const activeMasterTimers = [];
+
+    const registerTimerElement = (element) => {
+        let timerObj = activeMasterTimers.find(t => t.el === element);
+        if (!timerObj) {
+            timerObj = {
+                el: element,
+                remaining: null,
+                syncedAt: performance.now(),
+                isPaused: false
+            };
+            activeMasterTimers.push(timerObj);
+        }
+
+        let remaining = null;
+        if (element.dataset.timerRemaining !== undefined && element.dataset.timerRemaining !== "") {
+            const parsed = parseInt(element.dataset.timerRemaining, 10);
+            if (!isNaN(parsed)) remaining = parsed;
+        } else if (element.dataset.countdown) {
+            const target = new Date(element.dataset.countdown).getTime();
+            if (!isNaN(target)) {
+                remaining = Math.max(0, Math.floor((target - Date.now()) / 1000));
+            }
+        }
+
+        timerObj.remaining = remaining;
+        timerObj.syncedAt = performance.now();
+        timerObj.isPaused = element.dataset.timerPaused === "1" || element.hasAttribute("data-paused-timer");
+
+        if (timerObj.remaining !== null) {
+            element.textContent = formatTimerDisplay(timerObj.remaining);
+        }
+
+        return timerObj;
+    };
+
+    document.querySelectorAll("[data-countdown], [data-paused-timer], [data-timer-remaining]").forEach(registerTimerElement);
+
+    // Tick local cada 1 segundo con reloj monotónico
+    window.setInterval(() => {
+        const now = performance.now();
+        activeMasterTimers.forEach(t => {
+            if (!document.body.contains(t.el)) return;
+            if (t.remaining === null || t.remaining === undefined) return;
+            if (t.isPaused) {
+                t.el.textContent = formatTimerDisplay(t.remaining);
+                return;
+            }
+            const elapsed = Math.floor((now - t.syncedAt) / 1000);
+            const currentRemaining = Math.max(0, t.remaining - elapsed);
+            t.el.textContent = formatTimerDisplay(currentRemaining);
+        });
+    }, 1000);
+
+    const syncMasterTimer = (secondsRemaining, endsAt, isPaused) => {
+        const now = performance.now();
+        const timers = document.querySelectorAll("[data-countdown], [data-paused-timer], [data-timer-remaining]");
+        timers.forEach(el => {
+            let t = registerTimerElement(el);
+            if (secondsRemaining !== null && secondsRemaining !== undefined && !isNaN(secondsRemaining)) {
+                t.remaining = parseInt(secondsRemaining, 10);
+                t.syncedAt = now;
+                t.isPaused = Boolean(isPaused);
+                el.dataset.timerRemaining = t.remaining;
+                el.dataset.timerPaused = t.isPaused ? "1" : "0";
+                if (endsAt) el.dataset.countdown = endsAt;
+                el.textContent = formatTimerDisplay(t.remaining);
+            } else {
+                t.remaining = null;
+                el.textContent = "--:--";
+            }
+        });
+    };
 
     document.querySelectorAll("[data-live-clock]").forEach(clock => {
         const render = () => {
@@ -201,7 +274,7 @@
     if (liveRoot) {
         let fingerprint = liveRoot.dataset.state;
         const endpoint = liveRoot.dataset.livePoll;
-        const interval = Number(liveRoot.dataset.pollInterval || 5000);
+        const interval = Number(liveRoot.dataset.pollInterval || 3000);
         const poll = async () => {
             try {
                 const response = await fetch(endpoint, { headers: { Accept: "application/json" }, cache: "no-store" });
@@ -209,10 +282,57 @@
                 const envelope = await response.json();
                 if (!envelope.ok) return;
                 const state = envelope.data;
+
+                // 1. Sincronizar el cronómetro maestro en pantalla
+                syncMasterTimer(state.timerRemainingSeconds, state.timerEndsAt, state.timerIsPaused);
+
+                // 2. Si el evento fue publicado, redirigir a resultados si procede
                 if (liveRoot.dataset.resultsRedirect && state.eventStatus === "Published") {
                     window.location.replace(liveRoot.dataset.resultsRedirect);
                     return;
                 }
+
+                // 3. Actualizar conteo de votos del público y del jurado
+                document.querySelectorAll("[data-public-count]").forEach(item => item.textContent = state.publicVoteCount);
+                document.querySelectorAll("[data-jury-count]").forEach(item => item.textContent = state.jurorVoteCount);
+                document.querySelectorAll("[data-public-track]").forEach(item => {
+                    item.style.width = `${Math.min(100, state.publicVoteCount * 5)}%`;
+                });
+                document.querySelectorAll("[data-jury-track]").forEach(item => {
+                    const total = Number(item.closest("[data-live-poll]")?.dataset.jurorTotal || 0);
+                    if (total > 0) item.style.width = `${Math.min(100, state.jurorVoteCount * 100 / total)}%`;
+                });
+
+                // 4. Actualizar estado individual de jurados en mesa de control
+                if (Array.isArray(state.jurors)) {
+                    state.jurors.forEach(juror => {
+                        const row = document.querySelector(`[data-juror-row="${juror.id}"]`);
+                        if (!row) return;
+                        const icon = row.querySelector(".juror-status-icon");
+                        const badge = row.querySelector(".juror-status-badge");
+                        if (juror.hasVoted) {
+                            if (icon) {
+                                icon.textContent = "check_circle";
+                                icon.style.color = "var(--success, #16a34a)";
+                            }
+                            if (badge) {
+                                badge.className = "badge badge-sm badge-success juror-status-badge";
+                                badge.textContent = "Voto recibido";
+                            }
+                        } else {
+                            if (icon) {
+                                icon.textContent = "pending";
+                                icon.style.color = "var(--text-muted)";
+                            }
+                            if (badge) {
+                                badge.className = "badge badge-sm badge-muted juror-status-badge";
+                                badge.textContent = "Pendiente";
+                            }
+                        }
+                    });
+                }
+
+                // 5. Comparar cambios estructurales para recarga de pantalla
                 const next = [
                     state.eventStatus,
                     state.roundNumber,
@@ -226,15 +346,7 @@
                 ].join("|");
                 const current = (fingerprint || "").split("|");
                 const candidate = next.split("|");
-                document.querySelectorAll("[data-public-count]").forEach(item => item.textContent = state.publicVoteCount);
-                document.querySelectorAll("[data-jury-count]").forEach(item => item.textContent = state.jurorVoteCount);
-                document.querySelectorAll("[data-public-track]").forEach(item => {
-                    item.style.width = `${Math.min(100, state.publicVoteCount * 5)}%`;
-                });
-                document.querySelectorAll("[data-jury-track]").forEach(item => {
-                    const total = Number(item.closest("[data-live-poll]")?.dataset.jurorTotal || 0);
-                    if (total > 0) item.style.width = `${Math.min(100, state.jurorVoteCount * 100 / total)}%`;
-                });
+
                 const norm = val => (val === null || val === undefined ? "" : String(val).trim().toLowerCase());
                 const structuralChanged = current.slice(0, 4).map(norm).join("|") !== candidate.slice(0, 4).map(norm).join("|")
                     || norm(current[6]) !== norm(candidate[6])
@@ -245,7 +357,7 @@
 
                 if (structuralChanged) {
                     const activeModal = document.querySelector(".modal-backdrop:not([style*='display: none'])");
-                    // 1. Si la votación se acaba de abrir, cerrar modal de equipo y recargar para mostrar papeleta de votación
+                    // a) Si la votación se acaba de abrir, cerrar modal de equipo y recargar para mostrar papeleta de votación
                     if (state.presentationStatus === "VotingOpen") {
                         if (activeModal && activeModal.id === "public-team-modal") {
                             activeModal.style.display = "none";
@@ -253,11 +365,11 @@
                         window.location.reload();
                         return;
                     }
-                    // 2. Si el modal de reiniciar ronda está abierto en control en vivo, no recargar para no interrumpir al operador
+                    // b) Si el modal de reiniciar ronda está abierto en control en vivo, no recargar para no interrumpir al operador
                     if (activeModal && activeModal.id === "restart-round-modal") {
                         return;
                     }
-                    // 3. Si el usuario está leyendo detalles del equipo y la presentación sigue siendo la misma, no recargar
+                    // c) Si el usuario está leyendo detalles del equipo y la presentación sigue siendo la misma, no recargar
                     if (activeModal && activeModal.id === "public-team-modal") {
                         const samePresentation = norm(current[2]) === norm(candidate[2]) && norm(current[3]) === norm(candidate[3]);
                         if (samePresentation) {
@@ -270,7 +382,8 @@
                 document.body.classList.add("connection-lost");
             }
         };
-        window.setInterval(poll, interval + Math.floor(Math.random() * 900));
+        // Polling estricto cada 3 segundos
+        window.setInterval(poll, interval);
     }
 
     document.querySelectorAll("[data-rubric-editor]").forEach(form => {

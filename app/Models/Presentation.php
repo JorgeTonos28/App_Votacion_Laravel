@@ -15,7 +15,16 @@ class Presentation extends Model
 
     protected $guarded = [];
 
-    protected $casts = ['stage_started_at' => 'datetime', 'stage_ended_at' => 'datetime', 'voting_opened_at' => 'datetime', 'voting_closed_at' => 'datetime', 'timer_paused_at' => 'datetime', 'published_at' => 'datetime'];
+    protected $casts = [
+        'stage_started_at' => 'datetime',
+        'stage_ended_at' => 'datetime',
+        'voting_opened_at' => 'datetime',
+        'voting_closed_at' => 'datetime',
+        'timer_paused_at' => 'datetime',
+        'published_at' => 'datetime',
+        'paused_timer_seconds' => 'integer',
+        'extra_seconds' => 'integer',
+    ];
 
     public function participant(): BelongsTo
     {

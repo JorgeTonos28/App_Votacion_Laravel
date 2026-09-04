@@ -968,52 +968,61 @@ class AdminController extends Controller
 
     public function liveState(VotingEvent $event)
     {
-        return $this->envelope($this->queries->liveStateByCode($event->code));
+        $state = $this->queries->liveStateByCode($event->code);
+        $voted = $state['presentationId'] ? Vote::query()->where('presentation_id', $state['presentationId'])->where('role_type', 'Jury')->where('status', '!=', 'Invalidated')->pluck('actor_id') : collect();
+        $jurors = Juror::query()->where('event_id', $event->id)->where('status', 'Active')->orderBy('name')->get()->map(fn ($j) => ['id' => $j->id, 'name' => $j->name, 'hasVoted' => $voted->contains($j->id)]);
+        $state['jurors'] = $jurors->values()->all();
+
+        return $this->envelope($state);
     }
 
     public function control(Request $request, VotingEvent $event, string $operation)
     {
         $op = strtolower($operation);
 
-        if ($op === 'restart') {
-            $mode = $request->input('round_mode', 'next_round');
-            if ($mode === 'next_round') {
-                $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
-                $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
-                if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
-                    $this->results->calculate($event->id, (string) $request->user()->id);
+        try {
+            if ($op === 'restart') {
+                $mode = $request->input('round_mode', 'next_round');
+                if ($mode === 'next_round') {
+                    $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
+                    $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
+                    if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
+                        $this->results->calculate($event->id, (string) $request->user()->id);
+                    }
                 }
+                $round = $this->rounds->restart($event->id, (string) $request->user()->id, $mode);
+
+                $msg = $mode === 'same_round'
+                    ? "La ronda {$round} se reinició desde cero para todos los equipos."
+                    : "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.";
+
+                return back()->with('success', $msg);
             }
-            $round = $this->rounds->restart($event->id, (string) $request->user()->id, $mode);
 
-            $msg = $mode === 'same_round'
-                ? "La ronda {$round} se reinició desde cero para todos los equipos."
-                : "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.";
+            if ($op === 'reset_turn') {
+                $presentationId = (string) $request->input('presentation_id');
+                $this->liveControl->resetPresentationTurn($event->id, $presentationId, (string) $request->user()->id);
 
-            return back()->with('success', $msg);
+                return back()->with('success', 'El turno del equipo fue reiniciado a Pendiente.');
+            }
+
+            if ($op === 'add_time') {
+                $presentationId = (string) $request->input('presentation_id');
+                $seconds = (int) $request->input('seconds', 60);
+                $this->liveControl->addPresentationTime($event->id, $presentationId, $seconds, (string) $request->user()->id);
+
+                return back()->with('success', "+{$seconds}s añadidos al turno actual.");
+            }
+
+            $this->liveControl->operate($event->id, $operation, (string) $request->user()->id, $request->input('participant_id'), $request->input('presentation_id'), $request->input('reason'));
+            if (in_array($op, ['close', 'finish'], true)) {
+                $this->results->calculate($event->id, (string) $request->user()->id);
+            }
+
+            return back()->with('success', 'Estado actualizado.');
+        } catch (DomainException $e) {
+            return back()->withInput()->with('error', $e->getMessage());
         }
-
-        if ($op === 'reset_turn') {
-            $presentationId = (string) $request->input('presentation_id');
-            $this->liveControl->resetPresentationTurn($event->id, $presentationId, (string) $request->user()->id);
-
-            return back()->with('success', 'El turno del equipo fue reiniciado a Pendiente.');
-        }
-
-        if ($op === 'add_time') {
-            $presentationId = (string) $request->input('presentation_id');
-            $seconds = (int) $request->input('seconds', 60);
-            $this->liveControl->addPresentationTime($event->id, $presentationId, $seconds, (string) $request->user()->id);
-
-            return back()->with('success', "+{$seconds}s añadidos al turno actual.");
-        }
-
-        $this->liveControl->operate($event->id, $operation, (string) $request->user()->id, $request->input('participant_id'), $request->input('presentation_id'), $request->input('reason'));
-        if (in_array($op, ['close', 'finish'], true)) {
-            $this->results->calculate($event->id, (string) $request->user()->id);
-        }
-
-        return back()->with('success', 'Estado actualizado.');
     }
 
     public function eventResults(Request $request, VotingEvent $event)
