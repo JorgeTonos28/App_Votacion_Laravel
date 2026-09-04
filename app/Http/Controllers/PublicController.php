@@ -19,6 +19,9 @@ class PublicController extends Controller
         $session = $this->current($request);
         $state = $this->queries->liveState($session);
         $event = VotingEvent::query()->with('branding')->findOrFail($session['eventId']);
+        if ($state['eventStatus'] === 'Published') {
+            return redirect()->to(route('projection.ranking', $event->code).'?transition=lobby');
+        }
 
         return view('public.lobby', compact('session', 'state', 'event'));
     }

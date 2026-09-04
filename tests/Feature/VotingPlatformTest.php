@@ -154,6 +154,46 @@ class VotingPlatformTest extends TestCase
         $this->assertDatabaseHas('voters', ['display_name' => 'Visitante QA Actualizado']);
     }
 
+    public function test_public_and_jury_lobbies_redirect_to_published_results(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+
+        $publicAccess = $this->post('/evento/acceder', [
+            'event_code' => $event->code,
+            'display_name' => 'Visitante en lobby',
+        ]);
+        $publicToken = $publicAccess->getCookie('innovamente_public')->getValue();
+
+        $this->withCookie('innovamente_public', $publicToken)
+            ->get(route('public.lobby'))
+            ->assertOk()
+            ->assertSee('data-results-redirect', false)
+            ->assertSee('transition=lobby', false);
+
+        $confirmation = $this->post('/jurado/validar', [
+            'event_code' => $event->code,
+            'juror_code' => 'J7K4-PQ9M',
+        ]);
+        preg_match('/name="confirmation_token" value="([^"]+)"/', $confirmation->getContent(), $matches);
+        $jurorLogin = $this->post('/jurado/confirmar', ['confirmation_token' => html_entity_decode($matches[1])]);
+        $jurorToken = $jurorLogin->getCookie('innovamente_juror')->getValue();
+
+        $this->withCookie('innovamente_juror', $jurorToken)
+            ->get(route('jury.dashboard'))
+            ->assertOk()
+            ->assertSee('data-results-redirect', false)
+            ->assertSee('transition=lobby', false);
+
+        $event->update(['status' => 'Published']);
+        $resultsUrl = route('projection.ranking', $event->code).'?transition=lobby';
+        $this->withCookie('innovamente_public', $publicToken)
+            ->get(route('public.lobby'))
+            ->assertRedirect($resultsUrl);
+        $this->withCookie('innovamente_juror', $jurorToken)
+            ->get(route('jury.dashboard'))
+            ->assertRedirect($resultsUrl);
+    }
+
     public function test_access_limits_do_not_block_valid_jurors_or_distinct_audience_devices_on_the_same_network(): void
     {
         foreach (range(1, 7) as $attempt) {
