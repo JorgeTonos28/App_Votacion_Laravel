@@ -48,10 +48,13 @@ class EventQueryService
         }
         $version = (int) $group->criteria->where('enabled', true)->max('rubric_version');
         $criteria = $group->criteria->where('enabled', true)->where('rubric_version', $version)->sortBy('sort_order')->values();
+        $participant = $presentation->participant;
 
         return [
             'presentationId' => $presentation->id, 'participantId' => $presentation->participant_id,
-            'participantName' => $presentation->participant->name, 'projectTitle' => $presentation->participant->project_title,
+            'participantName' => $participant->name, 'projectTitle' => $participant->project_title,
+            'participantNumber' => $participant->number, 'participantMembers' => $participant->member_names,
+            'participantArea' => $participant->area, 'participantDescription' => $participant->description,
             'groupName' => $group->name, 'roleType' => $role,
             'votingClosesAt' => $this->timer($event, $presentation)['endsAt']?->toIso8601String(),
             'criteria' => $criteria,
@@ -62,6 +65,7 @@ class EventQueryService
     {
         $event = VotingEvent::query()->with(['presentations.participant', 'jurors'])->findOrFail($eventId);
         $presentation = $event->presentations->firstWhere('id', $event->active_presentation_id);
+        $participant = $presentation?->participant;
         $publicCount = $jurorCount = 0;
         $actorHasVoted = false;
         if ($presentation) {
@@ -76,9 +80,12 @@ class EventQueryService
         $timer = $this->timer($event, $presentation);
 
         return [
-            'eventId' => $event->id, 'eventCode' => $event->code, 'eventName' => $event->name, 'eventStatus' => $event->status,
+            'eventId' => $event->id, 'eventCode' => $event->code, 'eventName' => $event->name, 'eventStatus' => $event->status, 'roundNumber' => $event->current_round,
             'presentationId' => $presentation?->id, 'presentationStatus' => $presentation?->status,
-            'participantName' => $presentation?->participant?->name, 'projectTitle' => $presentation?->participant?->project_title,
+            'participantName' => $participant?->name, 'projectTitle' => $participant?->project_title,
+            'participantNumber' => $participant?->number, 'participantMembers' => $participant?->member_names ?? [],
+            'participantArea' => $participant?->area, 'participantDescription' => $participant?->description,
+            'participantFingerprint' => $participant ? Domain::technicalHash(implode('|', [$participant->name, $participant->project_title, $participant->area, $participant->description, $participant->members])) : null,
             'presentationDurationSeconds' => $event->presentation_duration_seconds, 'votingDurationSeconds' => $event->voting_duration_seconds,
             'stageStartedAt' => $presentation?->stage_started_at?->toIso8601String(), 'votingOpenedAt' => $presentation?->voting_opened_at?->toIso8601String(),
             'timerEndsAt' => $timer['endsAt']?->toIso8601String(), 'timerRemainingSeconds' => $timer['remaining'], 'timerIsPaused' => $timer['paused'],

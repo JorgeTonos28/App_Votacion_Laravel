@@ -61,9 +61,12 @@ class JuryController extends Controller
         $session = $this->current($request);
         $juror = Juror::query()->findOrFail($session['actorId']);
         $event = VotingEvent::query()->with('presentations.participant')->findOrFail($session['eventId']);
-        $votes = Vote::query()->where('event_id', $event->id)->where('actor_id', $juror->id)->get()->keyBy('presentation_id');
-        $history = $event->presentations->sortBy('sequence')->map(fn ($p) => ['participantName' => $p->participant->name, 'projectTitle' => $p->participant->project_title, 'presentationStatus' => $p->status, 'voteStatus' => $votes->get($p->id)?->status, 'submittedAt' => $votes->get($p->id)?->submitted_at])->values();
+        $votes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('actor_id', $juror->id)->get()->keyBy('presentation_id');
+        $history = $event->presentations->where('round_number', $event->current_round)->sortBy('sequence')->map(fn ($p) => ['participantName' => $p->participant->name, 'projectTitle' => $p->participant->project_title, 'presentationStatus' => $p->status, 'voteStatus' => $votes->get($p->id)?->status, 'submittedAt' => $votes->get($p->id)?->submitted_at])->values();
         $state = $this->queries->liveState($session);
+        if ($state['eventStatus'] === 'Published') {
+            return redirect()->to(route('projection.ranking', $event->code).'?transition=lobby');
+        }
 
         return view('jury.dashboard', compact('juror', 'event', 'history', 'state'));
     }

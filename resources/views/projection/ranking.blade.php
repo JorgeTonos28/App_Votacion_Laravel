@@ -11,12 +11,32 @@
 @endphp
 
 @section('content')
-<main class="ranking-stage">
+<main class="ranking-stage results-gate {{ $published ? 'is-calculating' : 'is-waiting' }}" data-results-gate data-results-published="{{ $published ? 'true' : 'false' }}" data-results-force-animation="{{ in_array(request()->query('transition'), ['projection', 'lobby'], true) ? 'true' : 'false' }}" data-results-state="{{ route('projection.state', $event->code) }}" data-results-duration="30000" data-event-code="{{ $event->code }}" data-round-number="{{ $state['roundNumber'] }}">
     <div class="ranking-orb ranking-orb-one"></div>
     <div class="ranking-orb ranking-orb-two"></div>
     <div class="ranking-watermark">INNOVAMENTE</div>
 
-    <div class="ranking-content">
+    <section class="results-gate-screen" aria-live="polite">
+        <div class="results-gate-card">
+            <div class="results-waiting-message">
+                <span class="results-gate-icon"><img src="{{ asset('favicon.png') }}" alt=""></span>
+                <span class="ranking-kicker"><span></span>{{ $event->name }}</span>
+                <h1>Los resultados aún no han sido publicados</h1>
+                <p>Mantén esta pantalla abierta. El ranking aparecerá automáticamente cuando la organización lo publique.</p>
+                <div class="results-waiting-status"><span></span> Esperando publicación</div>
+            </div>
+            <div class="results-calculating-message">
+                <span class="results-gate-icon"><img src="{{ asset('favicon.png') }}" alt=""></span>
+                <span class="ranking-kicker"><span></span>{{ $event->name }}</span>
+                <h1>Preparando los resultados</h1>
+                <p data-results-stage>Recopilando las evaluaciones recibidas…</p>
+                <div class="results-progress" aria-hidden="true"><span></span></div>
+                <small>Validando votos, ponderaciones y posiciones finales</small>
+            </div>
+        </div>
+    </section>
+
+    @if($published)<div class="ranking-content results-published-content" aria-hidden="true">
         <header class="ranking-heading">
             <div>
                 <span class="ranking-kicker"><span></span>{{ $event->name }}</span>
@@ -105,6 +125,7 @@
         </section>
 
         <footer class="ranking-footer"><span>Resultados calculados con ponderación de jurado y público</span><strong>{{ $event->code }}</strong></footer>
-    </div>
+    </div>@endif
 </main>
+<noscript><style>.results-gate.is-calculating .results-gate-screen{display:none}.results-gate.is-calculating .results-published-content{opacity:1;pointer-events:auto;visibility:visible}</style></noscript>
 @endsection

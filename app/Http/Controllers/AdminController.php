@@ -21,9 +21,11 @@ use App\Models\VotingGroup;
 use App\Models\VotingResult;
 use App\Services\AuditService;
 use App\Services\EventQueryService;
+use App\Services\EventRoundService;
 use App\Services\LiveControlService;
 use App\Services\QrCodeService;
 use App\Services\ResultService;
+use App\Services\RubricCsvImporter;
 use App\Services\VoteService;
 use App\Support\Domain;
 use Illuminate\Http\Request;
@@ -37,10 +39,12 @@ class AdminController extends Controller
     public function __construct(
         private readonly AuditService $audit,
         private readonly EventQueryService $queries,
+        private readonly EventRoundService $rounds,
         private readonly LiveControlService $liveControl,
         private readonly ResultService $results,
         private readonly VoteService $votes,
         private readonly QrCodeService $qr,
+        private readonly RubricCsvImporter $rubricCsvImporter,
     ) {}
 
     public function index()
@@ -87,8 +91,8 @@ class AdminController extends Controller
     public function allResults()
     {
         $events = VotingEvent::query()->withCount('participants')->get()->each(function ($e) {
-            $e->calculated_results = VotingResult::query()->where('event_id', $e->id)->whereNull('voting_group_id')->count();
-            $e->published_at = VotingResult::query()->where('event_id', $e->id)->whereNull('voting_group_id')->value('published_at');
+            $e->calculated_results = VotingResult::query()->where('event_id', $e->id)->where('round_number', $e->current_round)->whereNull('voting_group_id')->count();
+            $e->published_at = VotingResult::query()->where('event_id', $e->id)->where('round_number', $e->current_round)->whereNull('voting_group_id')->value('published_at');
         });
 
         return view('admin.all-results', compact('events'));
@@ -198,14 +202,15 @@ class AdminController extends Controller
 
     public function addParticipant(Request $request)
     {
-        $data = $request->validate(['event_id' => 'required|uuid|exists:events,id', 'name' => 'required|string|max:180', 'project_title' => 'nullable|string|max:240', 'members' => 'nullable|string|max:1000', 'area' => 'nullable|string|max:160', 'description' => 'nullable|string|max:3000']);
+        $data = $request->validate(['event_id' => 'required|uuid|exists:events,id', 'name' => 'required|string|max:180', 'project_title' => 'nullable|string|max:240', 'members' => 'nullable|array|max:30', 'members.*' => 'nullable|string|max:180', 'area' => 'nullable|string|max:160', 'description' => 'nullable|string|max:3000']);
         if (Presentation::query()->where('event_id', $data['event_id'])->where('status', '!=', 'Pending')->exists()) {
             throw new DomainException('CONFIGURATION_LOCKED', 'No puedes agregar participantes después de iniciar el evento.');
         }
         $number = (int) Participant::query()->where('event_id', $data['event_id'])->max('number') + 1;
         DB::transaction(function () use ($data, $number, $request) {
-            $p = Participant::query()->create(['event_id' => $data['event_id'], 'number' => $number, 'presentation_order' => $number, 'name' => trim($data['name']), 'project_title' => trim($data['project_title'] ?? '') ?: null, 'members' => trim($data['members'] ?? '') ?: null, 'area' => trim($data['area'] ?? '') ?: null, 'description' => trim($data['description'] ?? '') ?: null]);
-            Presentation::query()->create(['event_id' => $data['event_id'], 'participant_id' => $p->id, 'sequence' => $number]);
+            $p = Participant::query()->create(['event_id' => $data['event_id'], 'number' => $number, 'presentation_order' => $number, 'name' => trim($data['name']), 'project_title' => trim($data['project_title'] ?? '') ?: null, 'members' => Participant::serializeMemberNames($data['members'] ?? []), 'area' => trim($data['area'] ?? '') ?: null, 'description' => trim($data['description'] ?? '') ?: null]);
+            $round = (int) VotingEvent::query()->whereKey($data['event_id'])->value('current_round');
+            Presentation::query()->create(['event_id' => $data['event_id'], 'participant_id' => $p->id, 'round_number' => $round, 'sequence' => $number]);
             $this->audit->write($data['event_id'], 'Administrator', (string) $request->user()->id, 'PARTICIPANT_CREATED', 'Participant', $p->id, newValue: ['name' => $p->name]);
         });
 
@@ -225,8 +230,8 @@ class AdminController extends Controller
             if (! trim($c[0] ?? '')) {
                 continue;
             }$order++;
-            $p = Participant::query()->create(['event_id' => $event->id, 'number' => $order, 'presentation_order' => $order, 'name' => trim($c[0]), 'project_title' => trim($c[1] ?? '') ?: null, 'members' => trim($c[2] ?? '') ?: null, 'area' => trim($c[3] ?? '') ?: null]);
-            Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'sequence' => $order]);
+            $p = Participant::query()->create(['event_id' => $event->id, 'number' => $order, 'presentation_order' => $order, 'name' => trim($c[0]), 'project_title' => trim($c[1] ?? '') ?: null, 'members' => Participant::serializeMemberNames($c[2] ?? null), 'area' => trim($c[3] ?? '') ?: null, 'description' => trim($c[4] ?? '') ?: null]);
+            Presentation::query()->create(['event_id' => $event->id, 'participant_id' => $p->id, 'round_number' => $event->current_round, 'sequence' => $order]);
         }
 
         return back()->with('success', 'Participantes importados.');
@@ -245,13 +250,15 @@ class AdminController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:180',
             'project_title' => 'nullable|string|max:240',
-            'members' => 'nullable|string|max:1000',
+            'members' => 'nullable|array|max:30',
+            'members.*' => 'nullable|string|max:180',
             'area' => 'nullable|string|max:160',
             'description' => 'nullable|string|max:3000',
         ]);
         $previous = $participant->only(['name', 'project_title', 'members', 'area', 'description']);
         $payload = collect($data)->map(fn ($value) => is_string($value) ? (trim($value) ?: null) : $value)->all();
         $payload['name'] = trim($data['name']);
+        $payload['members'] = Participant::serializeMemberNames($data['members'] ?? []);
         $participant->update($payload);
         $this->audit->write($participant->event_id, 'Administrator', (string) $request->user()->id, 'PARTICIPANT_UPDATED', 'Participant', $participant->id, $previous, $participant->only(array_keys($previous)));
 
@@ -320,7 +327,7 @@ class AdminController extends Controller
 
     public function jurors(VotingEvent $event)
     {
-        $jurors = Juror::query()->where('event_id', $event->id)->orderBy('name')->get()->each(fn ($j) => $j->completed_evaluations = Vote::query()->where('event_id', $event->id)->where('actor_id', $j->id)->where('status', '!=', 'Invalidated')->count());
+        $jurors = Juror::query()->where('event_id', $event->id)->orderBy('name')->get()->each(fn ($j) => $j->completed_evaluations = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('actor_id', $j->id)->where('status', '!=', 'Invalidated')->count());
 
         return view('admin.jurors', compact('event', 'jurors'));
     }
@@ -434,7 +441,7 @@ class AdminController extends Controller
 
     public function voters(VotingEvent $event)
     {
-        $voters = Voter::query()->where('event_id', $event->id)->orderByDesc('last_access_at')->get()->each(fn ($v) => $v->votes_count = Vote::query()->where('event_id', $event->id)->where('actor_id', $v->id)->where('status', '!=', 'Invalidated')->count());
+        $voters = Voter::query()->where('event_id', $event->id)->orderByDesc('last_access_at')->get()->each(fn ($v) => $v->votes_count = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('actor_id', $v->id)->where('status', '!=', 'Invalidated')->count());
 
         return view('admin.voters', compact('event', 'voters'));
     }
@@ -526,26 +533,130 @@ class AdminController extends Controller
     {
         if ($this->configurationLocked($event)) {
             return back()->with('error', 'La rúbrica queda bloqueada cuando el evento inicia.');
-        }$data = $request->validate(['voting_group_id' => 'required|uuid', 'criteria' => 'required|array|min:1', 'criteria.*.id' => 'nullable|uuid', 'criteria.*.name' => 'required|string|max:180', 'criteria.*.description' => 'nullable|string|max:1000', 'criteria.*.weight_percent' => 'required|numeric|min:.01|max:100', 'criteria.*.scale_min' => 'required|numeric|min:0|max:100', 'criteria.*.scale_max' => 'required|numeric|min:.01|max:100', 'criteria.*.minimum_label' => 'nullable|string|max:80', 'criteria.*.maximum_label' => 'nullable|string|max:80', 'criteria.*.required' => 'nullable|boolean', 'criteria.*.comment_mode' => 'required|in:'.implode(',', Domain::COMMENT_MODES), 'criteria.*.help_text' => 'nullable|string|max:500']);
-        $group = VotingGroup::query()->with('criteria')->whereKey($data['voting_group_id'])->where('event_id', $event->id)->first();
-        if (! $group) {
-            return back()->with('error', 'No encontramos la audiencia de evaluación.');
-        }if (abs(collect($data['criteria'])->sum('weight_percent') - 100) > .001) {
-            return back()->with('error', 'Los pesos de los criterios deben sumar 100%.');
-        }$names = collect($data['criteria'])->map(fn ($c) => mb_strtolower(trim($c['name'])));
-        if ($names->duplicates()->isNotEmpty()) {
-            return back()->with('error', 'No repitas nombres de criterios dentro de la misma rúbrica.');
-        }DB::transaction(function () use ($data, $group, $event, $request) {
-            $submitted = collect($data['criteria'])->pluck('id')->filter();
-            Criterion::query()->where('voting_group_id', $group->id)->whereNotIn('id', $submitted)->delete();
-            foreach ($data['criteria'] as $i => $input) {
-                if ($input['scale_max'] <= $input['scale_min']) {
-                    throw new DomainException('INVALID_RUBRIC', 'Cada criterio necesita una escala válida.');
-                }Criterion::query()->updateOrCreate(['id' => $input['id'] ?? Domain::uuid()], ['event_id' => $event->id, 'voting_group_id' => $group->id, 'name' => trim($input['name']), 'description' => trim($input['description'] ?? '') ?: null, 'weight' => $input['weight_percent'] / 100, 'scale_min' => $input['scale_min'], 'scale_max' => $input['scale_max'], 'minimum_label' => trim($input['minimum_label'] ?? '') ?: null, 'maximum_label' => trim($input['maximum_label'] ?? '') ?: null, 'required' => (bool) ($input['required'] ?? false), 'comment_mode' => $input['comment_mode'], 'help_text' => trim($input['help_text'] ?? '') ?: null, 'sort_order' => $i + 1, 'enabled' => true]);
-            }$this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRIC_UPDATED', 'VotingGroup', $group->id, newValue: ['group' => $group->name, 'criteria' => count($data['criteria'])]);
+        }
+
+        $data = $request->validate([
+            'rubrics' => 'required|array|min:1',
+            'rubrics.*.voting_group_id' => 'required|uuid',
+            'rubrics.*.criteria' => 'required|array|min:1',
+            'rubrics.*.criteria.*.id' => 'nullable|uuid',
+            'rubrics.*.criteria.*.name' => 'required|string|max:180',
+            'rubrics.*.criteria.*.description' => 'nullable|string|max:1000',
+            'rubrics.*.criteria.*.weight_percent' => 'required|numeric|min:.01|max:100',
+            'rubrics.*.criteria.*.scale_min' => 'required|numeric|min:0|max:100',
+            'rubrics.*.criteria.*.scale_max' => 'required|numeric|min:.01|max:100',
+            'rubrics.*.criteria.*.minimum_label' => 'nullable|string|max:80',
+            'rubrics.*.criteria.*.maximum_label' => 'nullable|string|max:80',
+            'rubrics.*.criteria.*.required' => 'nullable|boolean',
+            'rubrics.*.criteria.*.comment_mode' => 'required|in:'.implode(',', Domain::COMMENT_MODES),
+            'rubrics.*.criteria.*.help_text' => 'nullable|string|max:500',
+        ]);
+
+        $groups = VotingGroup::query()->where('event_id', $event->id)->get()->keyBy('id');
+        $submittedGroupIds = collect($data['rubrics'])->pluck('voting_group_id');
+        if ($submittedGroupIds->duplicates()->isNotEmpty() || $submittedGroupIds->sort()->values()->all() !== $groups->keys()->sort()->values()->all()) {
+            return back()->withInput()->with('error', 'Debes guardar juntas todas las rúbricas del evento.');
+        }
+
+        foreach ($data['rubrics'] as $rubric) {
+            $group = $groups->get($rubric['voting_group_id']);
+            if (abs(collect($rubric['criteria'])->sum('weight_percent') - 100) > .001) {
+                return back()->withInput()->with('error', "Los pesos de la rúbrica de {$group->name} deben sumar 100%.");
+            }
+
+            $names = collect($rubric['criteria'])->map(fn ($criterion) => mb_strtolower(trim($criterion['name'])));
+            if ($names->duplicates()->isNotEmpty()) {
+                return back()->withInput()->with('error', "No repitas nombres de criterios en la rúbrica de {$group->name}.");
+            }
+
+            if (collect($rubric['criteria'])->contains(fn ($criterion) => $criterion['scale_max'] <= $criterion['scale_min'])) {
+                return back()->withInput()->with('error', "Cada criterio de la rúbrica de {$group->name} necesita una escala válida.");
+            }
+
+            $knownCriterionIds = Criterion::query()->where('voting_group_id', $group->id)->pluck('id');
+            $foreignCriterionIds = collect($rubric['criteria'])->pluck('id')->filter()->diff($knownCriterionIds);
+            if ($foreignCriterionIds->isNotEmpty()) {
+                return back()->withInput()->with('error', 'Uno de los criterios enviados no pertenece a su rúbrica.');
+            }
+        }
+
+        DB::transaction(function () use ($data, $groups, $event, $request) {
+            $summary = [];
+            foreach ($data['rubrics'] as $rubric) {
+                $group = $groups->get($rubric['voting_group_id']);
+                $submitted = collect($rubric['criteria'])->pluck('id')->filter();
+                Criterion::query()->where('voting_group_id', $group->id)->whereNotIn('id', $submitted)->delete();
+
+                foreach ($rubric['criteria'] as $index => $input) {
+                    Criterion::query()->updateOrCreate(
+                        ['id' => $input['id'] ?? Domain::uuid()],
+                        [
+                            'event_id' => $event->id,
+                            'voting_group_id' => $group->id,
+                            'name' => trim($input['name']),
+                            'description' => trim($input['description'] ?? '') ?: null,
+                            'weight' => $input['weight_percent'] / 100,
+                            'scale_min' => $input['scale_min'],
+                            'scale_max' => $input['scale_max'],
+                            'minimum_label' => trim($input['minimum_label'] ?? '') ?: null,
+                            'maximum_label' => trim($input['maximum_label'] ?? '') ?: null,
+                            'required' => (bool) ($input['required'] ?? false),
+                            'comment_mode' => $input['comment_mode'],
+                            'help_text' => trim($input['help_text'] ?? '') ?: null,
+                            'sort_order' => $index + 1,
+                            'enabled' => true,
+                        ]
+                    );
+                }
+                $summary[] = ['group' => $group->name, 'criteria' => count($rubric['criteria'])];
+            }
+
+            $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRICS_UPDATED', 'VotingEvent', $event->id, newValue: ['rubrics' => $summary]);
         });
 
-        return back()->with('success', "Rúbrica de {$group->name} guardada.");
+        return back()->with('success', 'Todas las rúbricas se guardaron correctamente.');
+    }
+
+    public function importRubric(Request $request, VotingEvent $event)
+    {
+        if ($this->configurationLocked($event)) {
+            return back()->with('error', 'La rúbrica queda bloqueada cuando el evento inicia.');
+        }
+        $data = $request->validate([
+            'voting_group_id' => 'required|uuid',
+            'csv' => 'required|file|max:2048|mimes:csv,txt',
+        ]);
+        $group = VotingGroup::query()->whereKey($data['voting_group_id'])->where('event_id', $event->id)->first();
+        if (! $group) {
+            return back()->with('error', 'No encontramos la audiencia de evaluación.');
+        }
+        $import = $this->rubricCsvImporter->parse($request->file('csv')->getRealPath());
+
+        DB::transaction(function () use ($import, $group, $event, $request) {
+            Criterion::query()->where('voting_group_id', $group->id)->delete();
+            foreach ($import['criteria'] as $index => $criterion) {
+                Criterion::query()->create([
+                    'id' => Domain::uuid(),
+                    'event_id' => $event->id,
+                    'voting_group_id' => $group->id,
+                    'name' => $criterion['name'],
+                    'description' => $criterion['description'],
+                    'weight' => $criterion['weight_percent'] / 100,
+                    'scale_min' => $criterion['scale_min'],
+                    'scale_max' => $criterion['scale_max'],
+                    'minimum_label' => $criterion['minimum_label'],
+                    'maximum_label' => $criterion['maximum_label'],
+                    'required' => $criterion['required'],
+                    'comment_mode' => $criterion['comment_mode'],
+                    'help_text' => $criterion['help_text'],
+                    'sort_order' => $index + 1,
+                    'enabled' => true,
+                ]);
+            }
+            $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'RUBRIC_IMPORTED', 'VotingGroup', $group->id, newValue: ['group' => $group->name, 'criteria' => count($import['criteria']), 'columns' => $import['columns']]);
+        });
+
+        return back()->with('success', count($import['criteria'])." criterios importados para {$group->name}.");
     }
 
     public function live(VotingEvent $event)
@@ -566,6 +677,16 @@ class AdminController extends Controller
 
     public function control(Request $request, VotingEvent $event, string $operation)
     {
+        if (strtolower($operation) === 'restart') {
+            $hasVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->exists();
+            $hasResults = VotingResult::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->exists();
+            if ($hasVotes && ($event->status !== 'Published' || ! $hasResults)) {
+                $this->results->calculate($event->id, (string) $request->user()->id);
+            }
+            $round = $this->rounds->restart($event->id, (string) $request->user()->id);
+
+            return back()->with('success', "La ronda {$round} está lista. Puedes abrir el lobby cuando quieras.");
+        }
         $this->liveControl->operate($event->id, $operation, (string) $request->user()->id, $request->input('participant_id'), $request->input('presentation_id'), $request->input('reason'));
         if (in_array(strtolower($operation), ['close', 'finish'], true)) {
             $this->results->calculate($event->id, (string) $request->user()->id);
@@ -574,11 +695,15 @@ class AdminController extends Controller
         return back()->with('success', 'Estado actualizado.');
     }
 
-    public function eventResults(VotingEvent $event)
+    public function eventResults(Request $request, VotingEvent $event)
     {
-        $ranking = $this->results->ranking($event->id);
+        $round = max(1, min((int) $event->current_round, (int) $request->integer('round', $event->current_round)));
+        $ranking = $this->results->ranking($event->id, $round);
+        $rounds = range(1, (int) $event->current_round);
+        $isCurrentRound = $round === (int) $event->current_round;
+        $roundPublished = VotingResult::query()->where('event_id', $event->id)->where('round_number', $round)->whereNotNull('published_at')->exists();
 
-        return view('admin.results', compact('event', 'ranking'));
+        return view('admin.results', compact('event', 'ranking', 'round', 'rounds', 'isCurrentRound', 'roundPublished'));
     }
 
     public function recalculate(Request $request, VotingEvent $event)
@@ -613,7 +738,7 @@ class AdminController extends Controller
 
     public function reports(VotingEvent $event)
     {
-        $totalVotes = Vote::query()->where('event_id', $event->id)->where('status', '!=', 'Invalidated')->count();
+        $totalVotes = Vote::query()->where('event_id', $event->id)->where('round_number', $event->current_round)->where('status', '!=', 'Invalidated')->count();
         $activeJurors = Juror::query()->where('event_id', $event->id)->where('status', 'Active')->count();
         $auditEntries = AuditEntry::query()->where('event_id', $event->id)->orderByDesc('timestamp')->limit(100)->get();
         $templates = EventTemplate::query()->where('active', true)->orderBy('name')->get();

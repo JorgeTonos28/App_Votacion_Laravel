@@ -10,21 +10,21 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/e/{code}', [HomeController::class, 'index'])->name('event.code');
-Route::post('/evento/acceder', [HomeController::class, 'access'])->middleware('throttle:8,10')->name('event.access');
+Route::post('/evento/acceder', [HomeController::class, 'access'])->middleware('throttle:public-access')->name('event.access');
 Route::get('/error', [HomeController::class, 'error'])->name('error');
 
 Route::get('/evento', [PublicController::class, 'lobby'])->name('public.lobby');
 Route::get('/evento/votar', [PublicController::class, 'ballot'])->name('public.ballot');
-Route::post('/evento/votar', [PublicController::class, 'submit'])->middleware('throttle:10,1')->name('public.submit');
+Route::post('/evento/votar', [PublicController::class, 'submit'])->middleware('throttle:public-vote')->name('public.submit');
 Route::get('/evento/confirmacion', [PublicController::class, 'confirmed'])->name('public.confirmed');
 Route::get('/api/public/state', [PublicController::class, 'state'])->name('public.state');
 
 Route::get('/jurado', [JuryController::class, 'access'])->name('jury.access');
-Route::post('/jurado/validar', [JuryController::class, 'validateCode'])->middleware('throttle:5,15')->name('jury.validate');
+Route::post('/jurado/validar', [JuryController::class, 'validateCode'])->middleware('throttle:jury-access')->name('jury.validate');
 Route::post('/jurado/confirmar', [JuryController::class, 'confirm'])->name('jury.confirm');
 Route::get('/jurado/panel', [JuryController::class, 'dashboard'])->name('jury.dashboard');
 Route::get('/jurado/evaluar', [JuryController::class, 'ballot'])->name('jury.ballot');
-Route::post('/jurado/evaluar', [JuryController::class, 'submit'])->middleware('throttle:10,1')->name('jury.submit');
+Route::post('/jurado/evaluar', [JuryController::class, 'submit'])->middleware('throttle:jury-vote')->name('jury.submit');
 Route::post('/jurado/salir', [JuryController::class, 'logout'])->name('jury.logout');
 Route::get('/api/jury/state', [JuryController::class, 'state'])->name('jury.state');
 
@@ -87,6 +87,7 @@ Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::post('/admin/votantes/{voter}/estado', [AdminController::class, 'changeVoterStatus'])->name('admin.voters.status');
     Route::post('/admin/votacion/pesos', [AdminController::class, 'saveWeights'])->name('admin.voting.weights');
     Route::post('/admin/eventos/{event}/votacion/rubrica', [AdminController::class, 'saveRubric'])->name('admin.voting.rubric');
+    Route::post('/admin/eventos/{event}/votacion/rubrica/importar', [AdminController::class, 'importRubric'])->name('admin.voting.rubric.import');
     Route::post('/admin/votos/{vote}/invalidar', [AdminController::class, 'invalidateVote'])->name('admin.votes.invalidate');
 });
 

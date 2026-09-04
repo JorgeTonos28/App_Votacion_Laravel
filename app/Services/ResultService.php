@@ -23,10 +23,11 @@ class ResultService
         if (abs((float) $groups->sum('weight') - 1) > .0001) {
             throw new DomainException('WEIGHTS_INVALID', 'Los pesos de los grupos no suman 100%.');
         }
-        $votes = Vote::query()->where('event_id', $eventId)->where('status', '!=', 'Invalidated')->get();
+        $round = (int) $event->current_round;
+        $votes = Vote::query()->where('event_id', $eventId)->where('round_number', $round)->where('status', '!=', 'Invalidated')->get();
         $voterCount = Voter::query()->where('event_id', $eventId)->where('status', 'Active')->count();
         $jurors = $event->jurors->where('status', 'Active')->keyBy('id');
-        VotingResult::query()->where('event_id', $eventId)->delete();
+        VotingResult::query()->where('event_id', $eventId)->where('round_number', $round)->delete();
         $computed = [];
         foreach ($event->participants->where('status', '!=', 'Disqualified') as $participant) {
             $groupScores = [];
@@ -47,7 +48,7 @@ class ResultService
                     && (! $group->require_all_jurors || $group->role_type !== 'Jury' || $groupVotes->count() >= $jurors->count());
                 $score = round($score, 4);
                 $groupScores[$group->id] = ['score' => $score, 'voteCount' => $groupVotes->count(), 'quorum' => $quorum, 'role' => $group->role_type];
-                VotingResult::query()->create(['event_id' => $eventId, 'participant_id' => $participant->id, 'voting_group_id' => $group->id, 'score' => $score, 'vote_count' => $groupVotes->count(), 'quorum_met' => $quorum]);
+                VotingResult::query()->create(['event_id' => $eventId, 'round_number' => $round, 'participant_id' => $participant->id, 'voting_group_id' => $group->id, 'score' => $score, 'vote_count' => $groupVotes->count(), 'quorum_met' => $quorum]);
             }
             $final = round($groups->sum(fn ($group) => $groupScores[$group->id]['score'] * (float) $group->weight), 4);
             $computed[] = ['participant' => $participant, 'final' => $final, 'quorum' => collect($groupScores)->every(fn ($g) => $g['quorum']), 'groups' => $groupScores];
@@ -58,17 +59,18 @@ class ResultService
         });
         foreach ($computed as $index => $row) {
             $tied = count(array_filter($computed, fn ($x) => $x['final'] === $row['final'])) > 1;
-            VotingResult::query()->create(['event_id' => $eventId, 'participant_id' => $row['participant']->id, 'score' => $row['final'], 'vote_count' => collect($row['groups'])->sum('voteCount'), 'quorum_met' => $row['quorum'], 'rank' => $index + 1, 'tie_status' => $tied ? 'Tied' : 'None']);
+            VotingResult::query()->create(['event_id' => $eventId, 'round_number' => $round, 'participant_id' => $row['participant']->id, 'score' => $row['final'], 'vote_count' => collect($row['groups'])->sum('voteCount'), 'quorum_met' => $row['quorum'], 'rank' => $index + 1, 'tie_status' => $tied ? 'Tied' : 'None']);
         }
         $this->audit->write($eventId, 'Administrator', $actorId, 'RESULTS_RECALCULATED', 'Event', $eventId, newValue: ['participants' => count($computed)]);
 
-        return $this->ranking($eventId);
+        return $this->ranking($eventId, $round);
     }
 
-    public function ranking(string $eventId): array
+    public function ranking(string $eventId, ?int $round = null): array
     {
-        $final = VotingResult::query()->where('event_id', $eventId)->whereNull('voting_group_id')->orderBy('rank')->get();
-        $groupRows = VotingResult::query()->where('event_id', $eventId)->whereNotNull('voting_group_id')->get();
+        $round ??= (int) VotingEvent::query()->whereKey($eventId)->value('current_round');
+        $final = VotingResult::query()->where('event_id', $eventId)->where('round_number', $round)->whereNull('voting_group_id')->orderBy('rank')->get();
+        $groupRows = VotingResult::query()->where('event_id', $eventId)->where('round_number', $round)->whereNotNull('voting_group_id')->get();
         $participants = Participant::query()->where('event_id', $eventId)->get()->keyBy('id');
         $event = VotingEvent::query()->with('groups')->findOrFail($eventId);
         $groups = $event->groups->keyBy('id');
@@ -89,14 +91,15 @@ class ResultService
         if (! $event) {
             throw new DomainException('EVENT_NOT_FOUND', 'No encontramos el evento.', 404);
         }
-        $final = VotingResult::query()->where('event_id', $eventId)->whereNull('voting_group_id')->get();
+        $round = (int) $event->current_round;
+        $final = VotingResult::query()->where('event_id', $eventId)->where('round_number', $round)->whereNull('voting_group_id')->get();
         if ($final->isEmpty()) {
             throw new DomainException('RESULTS_NOT_READY', 'Debes calcular los resultados antes de publicar.');
         }
         if ($event->require_quorum_to_publish && $final->contains(fn ($r) => ! $r->quorum_met)) {
             throw new DomainException('QUORUM_NOT_MET', 'No se alcanzó el quórum requerido.');
         }
-        VotingResult::query()->where('event_id', $eventId)->update(['published_at' => now()]);
+        VotingResult::query()->where('event_id', $eventId)->where('round_number', $round)->update(['published_at' => now()]);
         $event->update(['status' => 'Published']);
         $this->audit->write($eventId, 'Administrator', $actorId, 'RESULTS_PUBLISHED', 'Event', $eventId);
     }
@@ -104,7 +107,7 @@ class ResultService
     public function unpublish(string $eventId, string $actorId): void
     {
         $event = VotingEvent::query()->findOrFail($eventId);
-        VotingResult::query()->where('event_id', $eventId)->update(['published_at' => null]);
+        VotingResult::query()->where('event_id', $eventId)->where('round_number', $event->current_round)->update(['published_at' => null]);
         $event->update(['status' => 'Finished']);
         $this->audit->write($eventId, 'Administrator', $actorId, 'RESULTS_UNPUBLISHED', 'Event', $eventId);
     }
@@ -117,7 +120,7 @@ class ResultService
             }
         }
 
-return 0;
+        return 0;
     }
 
     private function roleVotes(array $row, string $role): int
@@ -128,6 +131,6 @@ return 0;
             }
         }
 
-return 0;
+        return 0;
     }
 }

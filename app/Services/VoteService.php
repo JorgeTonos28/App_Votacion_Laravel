@@ -67,6 +67,7 @@ class VoteService
                 } else {
                     $vote = Vote::query()->create([
                         'event_id' => $event->id, 'presentation_id' => $presentation->id, 'participant_id' => $presentation->participant_id,
+                        'round_number' => $event->current_round,
                         'voting_group_id' => $group->id, 'actor_id' => $session['actorId'], 'actor_key' => $actorKey,
                         'role_type' => $role, 'rubric_version' => $version, 'raw_score' => $calculated['raw'],
                         'normalized_score' => $calculated['normalized'], 'session_id' => $session['sessionId'], 'client_request_id' => $clientRequestId,
