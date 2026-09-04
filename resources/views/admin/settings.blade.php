@@ -179,6 +179,87 @@
     </div>
 </section>
 
+<!-- Plantillas de Eventos -->
+<section class="card panel" style="margin-bottom: 24px;">
+    <header class="panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="material-symbols-outlined" style="color: var(--primary);">dashboard_customize</span>
+                <h2>Plantillas de Eventos</h2>
+            </div>
+            <p class="form-hint" style="margin: 2px 0 0;">Configuraciones predeterminadas (criterios, tiempos y ponderaciones) para estandarizar y crear nuevos eventos con un solo clic.</p>
+        </div>
+        <button type="button" class="button button-sm button-accent" data-modal-open="new-template-modal">
+            <span class="material-symbols-outlined">add</span> Nueva Plantilla
+        </button>
+    </header>
+
+    <div class="panel-body">
+        @if($templates->isEmpty())
+            <div class="empty-state" style="padding: 32px 16px; text-align: center;">
+                <span class="material-symbols-outlined" style="font-size: 40px; color: var(--text-muted);">bookmark_border</span>
+                <p style="margin: 8px 0; color: var(--text-muted);">No hay plantillas de eventos registradas aún.</p>
+                <button type="button" class="button button-sm" data-modal-open="new-template-modal">Crear primera plantilla</button>
+            </div>
+        @else
+            <div class="template-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px;">
+                @foreach($templates as $tmpl)
+                    <article class="template-card card" style="display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border); padding: 18px; border-radius: 12px; background: var(--surface);">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px;">
+                                <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text);">{{ $tmpl->name }}</h3>
+                                <span class="status-pill {{ $tmpl->active ? 'status-live' : 'status-finished' }}" style="font-size: 11px;">
+                                    {{ $tmpl->active ? 'Activa' : 'Inactiva' }}
+                                </span>
+                            </div>
+                            <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 14px; line-height: 1.4;">
+                                {{ $tmpl->description ?: 'Sin descripción adicional.' }}
+                            </p>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;">
+                                <span class="badge" style="background: rgba(4, 46, 128, 0.08); color: var(--primary); font-size: 11px; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                                    <span class="material-symbols-outlined" style="font-size: 14px;">timer</span> Pitch: {{ $tmpl->presentationMinutes() }}m
+                                </span>
+                                <span class="badge" style="background: rgba(224, 76, 56, 0.08); color: var(--accent); font-size: 11px; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;">
+                                    <span class="material-symbols-outlined" style="font-size: 14px;">how_to_vote</span> Voto: {{ $tmpl->votingMinutes() }}m
+                                </span>
+                                <span class="badge" style="background: var(--surface-subtle); color: var(--text); font-size: 11px; padding: 4px 8px; border-radius: 6px;">
+                                    Jurado {{ $tmpl->juryWeight() }}% / Pub {{ $tmpl->publicWeight() }}%
+                                </span>
+                                @if($tmpl->criteriaCount() > 0)
+                                    <span class="badge" style="background: rgba(16, 185, 129, 0.08); color: #059669; font-size: 11px; padding: 4px 8px; border-radius: 6px;">
+                                        {{ $tmpl->criteriaCount() }} criterios
+                                    </span>
+                                @endif
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 12px; margin-top: auto;">
+                            <a href="{{ route('admin.events.create', ['template_id' => $tmpl->id]) }}" class="button button-sm button-secondary" style="font-size: 12px;">
+                                <span class="material-symbols-outlined" style="font-size: 15px;">rocket_launch</span> Usar plantilla
+                            </a>
+                            <div style="display: flex; gap: 6px;">
+                                <form action="{{ route('admin.templates.toggle', $tmpl) }}" method="post" style="display: inline;">
+                                    @csrf
+                                    <button type="submit" class="button button-sm button-ghost" title="{{ $tmpl->active ? 'Desactivar plantilla' : 'Activar plantilla' }}" style="padding: 6px 8px;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px;">{{ $tmpl->active ? 'visibility_off' : 'visibility' }}</span>
+                                    </button>
+                                </form>
+                                <form action="{{ route('admin.templates.delete', $tmpl) }}" method="post" style="display: inline;" onsubmit="return confirm('¿Eliminar la plantilla {{ addslashes($tmpl->name) }}?');">
+                                    @csrf
+                                    @method('delete')
+                                    <button type="submit" class="button button-sm button-ghost" title="Eliminar plantilla" style="padding: 6px 8px; color: var(--accent);">
+                                        <span class="material-symbols-outlined" style="font-size: 16px;">delete</span>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </article>
+                @endforeach
+            </div>
+        @endif
+    </div>
+</section>
+
 <!-- Parámetros Técnicos del Sistema -->
 <section class="card panel">
     <header class="panel-header">
@@ -265,6 +346,83 @@
                 <button type="button" class="button button-ghost" data-modal-close="new-user-modal">Cancelar</button>
                 <button type="submit" class="button button-accent">
                     <span class="material-symbols-outlined">send</span> Enviar Invitación
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Nueva Plantilla de Evento -->
+<div class="modal-backdrop" id="new-template-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 580px;">
+        <div class="modal-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="material-symbols-outlined" style="color: var(--primary);">dashboard_customize</span>
+                <h3>Nueva Plantilla de Evento</h3>
+            </div>
+            <button type="button" class="icon-button" data-modal-close="new-template-modal">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+        <form action="{{ route('admin.templates.create') }}" method="post">
+            @csrf
+            <div class="modal-body stack" style="gap: 16px;">
+                <p style="font-size: 13px; color: var(--text-muted); margin: 0;">
+                    Define una plantilla estándar con criterios, tiempos de pitch y votación para reutilizar en futuros eventos.
+                </p>
+
+                <div class="form-group">
+                    <label for="tmpl-name">Nombre de la plantilla</label>
+                    <input id="tmpl-name" class="form-control" type="text" name="name" required maxlength="180" placeholder="Ej. Hackathon Universitario" autofocus>
+                </div>
+
+                <div class="form-group">
+                    <label for="tmpl-desc">Descripción</label>
+                    <input id="tmpl-desc" class="form-control" type="text" name="description" maxlength="1000" placeholder="Ej. Formato para competencias de innovación con pitch de 3 minutos">
+                </div>
+
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label for="tmpl-presentation">Minutos de Pitch (Exposición)</label>
+                        <input id="tmpl-presentation" class="form-control" type="number" name="presentation_duration_minutes" value="3" min="1" max="120" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="tmpl-voting">Minutos de Votación</label>
+                        <input id="tmpl-voting" class="form-control" type="number" name="voting_duration_minutes" value="2" min="1" max="60" required>
+                    </div>
+                </div>
+
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label for="tmpl-jury-weight">Peso Jurado (%)</label>
+                        <input id="tmpl-jury-weight" class="form-control" type="number" name="jury_weight_percent" value="70" min="0" max="100" step="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="tmpl-public-weight">Peso Público (%)</label>
+                        <input id="tmpl-public-weight" class="form-control" type="number" name="public_weight_percent" value="30" min="0" max="100" step="1" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="tmpl-access-mode">Acceso del Público</label>
+                    <select id="tmpl-access-mode" class="form-control" name="public_access_mode">
+                        <option value="Device">Por Dispositivo (Recomendado - 1 voto por móvil/navegador)</option>
+                        <option value="IndividualCode">Código Personal (Pines individuales)</option>
+                        <option value="AttendeeList">Lista de Asistentes (Cédula o Matrícula)</option>
+                        <option value="Hybrid">Híbrido</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="tmpl-criteria">Criterios de Evaluación (Opcional)</label>
+                    <textarea id="tmpl-criteria" class="form-control" name="criteria_text" rows="4" placeholder="Uno por línea, con puntos opcionales ej:&#10;Innovación y Originalidad: 25&#10;Viabilidad Técnica: 25&#10;Impacto de la Solución: 25&#10;Claridad del Pitch: 25"></textarea>
+                    <small class="form-hint">Escribe cada criterio en una línea. Si agregas <code>: número</code>, asignará el puntaje máximo (por defecto 25 puntos).</small>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px;">
+                <button type="button" class="button button-ghost" data-modal-close="new-template-modal">Cancelar</button>
+                <button type="submit" class="button button-accent">
+                    <span class="material-symbols-outlined">save</span> Guardar Plantilla
                 </button>
             </div>
         </form>

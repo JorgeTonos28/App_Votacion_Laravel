@@ -827,6 +827,99 @@ class VotingPlatformTest extends TestCase
         $this->assertTrue(\Illuminate\Support\Facades\Hash::check('NuevoPasswordSeguro2026!', $admin->fresh()->password));
     }
 
+    public function test_returning_device_voter_is_automatically_identified_without_reasking_name(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $deviceId = (string) Str::uuid();
+
+        // 1. First time access: voter registers with device and name
+        $response = $this->withCookie('innovamente_device', $deviceId)
+            ->post(route('event.access'), [
+                'event_code' => $event->code,
+                'display_name' => 'María Rodríguez',
+            ]);
+
+        $response->assertRedirect(route('public.lobby'));
+        $response->assertCookie('innovamente_public');
+
+        // 2. Return access via /e/{code}: with session cleared but device cookie preserved
+        $returnDirect = $this->withCookie('innovamente_device', $deviceId)
+            ->get(route('event.code', ['code' => $event->code]));
+
+        $returnDirect->assertRedirect(route('public.lobby'));
+        $returnDirect->assertCookie('innovamente_public');
+
+        // 3. Return access via form submission without name
+        $returnForm = $this->withCookie('innovamente_device', $deviceId)
+            ->post(route('event.access'), [
+                'event_code' => $event->code,
+                'display_name' => '',
+            ]);
+
+        $returnForm->assertRedirect(route('public.lobby'));
+        $returnForm->assertCookie('innovamente_public');
+    }
+
+    public function test_admin_templates_workflow_and_event_creation_from_template(): void
+    {
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+
+        // 1. Settings view renders templates
+        $this->actingAs($admin)->get(route('admin.settings'))
+            ->assertOk()
+            ->assertSee('Plantillas de Eventos')
+            ->assertSee('Nueva Plantilla');
+
+        // 2. Admin creates a new template with criteria
+        $this->actingAs($admin)->post(route('admin.templates.create'), [
+            'name' => 'Demo Day Tecnológico',
+            'description' => 'Plantilla para evaluación de startups de base tecnológica',
+            'category' => 'Startup',
+            'presentation_duration_minutes' => 4,
+            'voting_duration_minutes' => 3,
+            'jury_weight_percent' => 80,
+            'public_weight_percent' => 20,
+            'public_access_mode' => 'Device',
+            'criteria_text' => "Innovación Tecnológica: 30\nTracción y Negocio: 35\nEquipo y Pitch: 35",
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $template = \App\Models\EventTemplate::query()->where('name', 'Demo Day Tecnológico')->firstOrFail();
+        $this->assertSame(4 * 60, $template->configValue('presentation_duration_seconds'));
+        $this->assertSame(80.0, $template->juryWeight());
+        $this->assertCount(3, $template->criteria());
+
+        // 3. Admin creates an event using this template
+        $uniqueCode = 'TPL' . rand(100, 999);
+        $this->actingAs($admin)->post(route('admin.events.store'), [
+            'template_id' => $template->id,
+            'name' => 'Pitch Competition 2026',
+            'code' => $uniqueCode,
+            'starts_at_local' => '2026-10-01T10:00',
+            'ends_at_local' => '2026-10-01T14:00',
+            'time_zone' => 'America/Santo_Domingo',
+            'public_access_mode' => 'Device',
+            'results_visibility' => 'ParticipationOnly',
+            'presentation_duration_seconds' => 240,
+            'voting_duration_seconds' => 180,
+            'jury_weight_percent' => 80,
+            'public_weight_percent' => 20,
+            'allow_juror_vote_edit' => 1,
+        ])->assertRedirect();
+
+        $newEvent = VotingEvent::query()->where('code', $uniqueCode)->firstOrFail();
+        $juryGroup = $newEvent->groups()->where('role_type', 'Jury')->with('criteria')->firstOrFail();
+        $this->assertCount(3, $juryGroup->criteria);
+        $this->assertTrue($juryGroup->criteria->pluck('name')->contains('Innovación Tecnológica'));
+
+        // 4. Admin saves an existing event as a template
+        $this->actingAs($admin)->post(route('admin.events.save-template', $newEvent), [
+            'template_name' => 'Copia de Pitch Competition',
+            'template_description' => 'Plantilla derivada de Pitch Competition',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->assertTrue(\App\Models\EventTemplate::query()->where('name', 'Copia de Pitch Competition')->exists());
+    }
+
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
     {
         return [

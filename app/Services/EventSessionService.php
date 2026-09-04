@@ -21,7 +21,7 @@ class EventSessionService
         $voter = match ($event->public_access_mode) {
             'IndividualCode' => $this->findByPersonalCode($event->id, $credential),
             'AttendeeList' => $this->findByExternalId($event->id, $credential),
-            'Hybrid' => $credential ? ($this->findByExternalId($event->id, $credential, false) ?? $this->findByPersonalCode($event->id, $credential, false)) : null,
+            'Hybrid' => $credential ? ($this->findByExternalId($event->id, $credential, false) ?? $this->findByPersonalCode($event->id, $credential, false)) : Voter::query()->where('event_id', $event->id)->where('device_hash', $deviceHash)->first(),
             default => Voter::query()->where('event_id', $event->id)->where('device_hash', $deviceHash)->first(),
         };
         if (! $voter) {

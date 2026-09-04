@@ -71,6 +71,10 @@ Route::middleware(['auth', 'role:Administrator'])->group(function () {
     Route::post('/admin/usuarios', [AdminController::class, 'createUser'])->name('admin.users.create');
     Route::post('/admin/usuarios/{user}/reenviar-invitacion', [AdminController::class, 'resendInvitation'])->name('admin.users.resend');
     Route::post('/admin/usuarios/{user}/estado', [AdminController::class, 'toggleUserStatus'])->name('admin.users.toggle-status');
+    Route::post('/admin/plantillas', [AdminController::class, 'createTemplate'])->name('admin.templates.create');
+    Route::post('/admin/plantillas/{template}/estado', [AdminController::class, 'toggleTemplate'])->name('admin.templates.toggle');
+    Route::post('/admin/plantillas/{template}/eliminar', [AdminController::class, 'deleteTemplate'])->name('admin.templates.delete');
+    Route::post('/admin/eventos/{event}/guardar-plantilla', [AdminController::class, 'saveEventAsTemplate'])->name('admin.events.save-template');
     Route::get('/admin/seguridad/mfa', [AccountController::class, 'mfa'])->name('admin.mfa');
     Route::post('/admin/seguridad/mfa', [AccountController::class, 'enableMfa'])->name('admin.mfa.enable');
     Route::post('/admin/seguridad/mfa/desactivar', [AccountController::class, 'disableMfa'])->name('admin.mfa.disable');

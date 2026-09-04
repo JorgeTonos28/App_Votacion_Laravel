@@ -178,8 +178,9 @@ class AdminController extends Controller
             'max_execution_time' => ini_get('max_execution_time').'s',
             'memory_limit' => ini_get('memory_limit'),
         ];
+        $templates = EventTemplate::query()->orderBy('name')->get();
 
-        return view('admin.settings', compact('users', 'metrics', 'specs'));
+        return view('admin.settings', compact('users', 'metrics', 'specs', 'templates'));
     }
 
     public function createUser(Request $request)
@@ -264,11 +265,146 @@ class AdminController extends Controller
         return back()->with('success', "Estado del usuario actualizado a ".($newStatus === 'Active' ? 'Activo' : 'Inactivo').'.');
     }
 
-    public function create()
+    public function createTemplate(Request $request)
+    {
+        $data = $request->validate([
+            'name' => 'required|string|max:180',
+            'description' => 'nullable|string|max:1000',
+            'category' => 'nullable|string|max:100',
+            'presentation_duration_minutes' => 'required|integer|min:1|max:120',
+            'voting_duration_minutes' => 'required|integer|min:1|max:60',
+            'jury_weight_percent' => 'required|numeric|min:0|max:100',
+            'public_weight_percent' => 'required|numeric|min:0|max:100',
+        ], [
+            'name.required' => 'Ingresa el nombre de la plantilla.',
+            'presentation_duration_minutes.required' => 'Ingresa los minutos de exposición.',
+            'voting_duration_minutes.required' => 'Ingresa los minutos de votación.',
+        ]);
+
+        if (abs($data['jury_weight_percent'] + $data['public_weight_percent'] - 100) > .001) {
+            return back()->withInput()->withErrors(['Los pesos del jurado y el público deben sumar 100%.']);
+        }
+
+        $criteria = [];
+        if (!empty($request->input('criteria_text'))) {
+            $lines = explode("\n", str_replace("\r", "", (string) $request->input('criteria_text')));
+            $order = 1;
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '') continue;
+                $parts = explode(':', $line, 2);
+                $name = trim($parts[0]);
+                $maxPoints = isset($parts[1]) && is_numeric(trim($parts[1])) ? (float) trim($parts[1]) : 25;
+                $criteria[] = [
+                    'name' => $name,
+                    'max_points' => $maxPoints,
+                    'order_index' => $order++,
+                ];
+            }
+        }
+
+        EventTemplate::query()->create([
+            'name' => trim($data['name']),
+            'description' => trim($data['description'] ?? '') ?: null,
+            'configuration_json' => [
+                'category' => trim($data['category'] ?? '') ?: 'General',
+                'presentation_duration_seconds' => $data['presentation_duration_minutes'] * 60,
+                'voting_duration_seconds' => $data['voting_duration_minutes'] * 60,
+                'jury_weight_percent' => (float) $data['jury_weight_percent'],
+                'public_weight_percent' => (float) $data['public_weight_percent'],
+                'public_access_mode' => $request->input('public_access_mode', 'Device'),
+                'results_visibility' => 'ParticipationOnly',
+                'criteria' => $criteria,
+            ],
+            'branding_json' => [],
+            'active' => true,
+        ]);
+
+        $this->audit->write(null, 'Administrator', (string) $request->user()->id, 'TEMPLATE_CREATED', 'EventTemplate', null, newValue: ['name' => $data['name']]);
+
+        return back()->with('success', "Plantilla '{$data['name']}' creada exitosamente.");
+    }
+
+    public function toggleTemplate(EventTemplate $template)
+    {
+        $template->update(['active' => !$template->active]);
+        $status = $template->active ? 'activada' : 'desactivada';
+
+        return back()->with('success', "Plantilla '{$template->name}' {$status}.");
+    }
+
+    public function deleteTemplate(EventTemplate $template)
+    {
+        $name = $template->name;
+        $template->delete();
+
+        return back()->with('success', "Plantilla '{$name}' eliminada.");
+    }
+
+    public function saveEventAsTemplate(Request $request, VotingEvent $event)
+    {
+        $data = $request->validate([
+            'template_name' => 'required|string|max:180',
+            'template_description' => 'nullable|string|max:1000',
+        ], [
+            'template_name.required' => 'Ingresa un nombre para la nueva plantilla.',
+        ]);
+
+        $event->load('groups.criteria');
+        $criteria = [];
+        $juryWeight = 70;
+        $publicWeight = 30;
+
+        foreach ($event->groups as $group) {
+            if ($group->role_type === 'Jury') {
+                $juryWeight = round($group->weight * 100, 2);
+            } elseif ($group->role_type === 'Public') {
+                $publicWeight = round($group->weight * 100, 2);
+            }
+            foreach ($group->criteria as $c) {
+                $criteria[] = [
+                    'group' => $group->role_type,
+                    'name' => $c->name,
+                    'description' => $c->description,
+                    'weight' => (float) $c->weight,
+                ];
+            }
+        }
+
+        $template = EventTemplate::query()->create([
+            'name' => trim($data['template_name']),
+            'description' => trim($data['template_description'] ?? '') ?: "Plantilla generada a partir de {$event->name}.",
+            'configuration_json' => [
+                'category' => $event->category ?: 'General',
+                'presentation_duration_seconds' => $event->presentation_duration_seconds,
+                'voting_duration_seconds' => $event->voting_duration_seconds,
+                'jury_weight_percent' => $juryWeight,
+                'public_weight_percent' => $publicWeight,
+                'public_access_mode' => $event->public_access_mode,
+                'results_visibility' => $event->results_visibility,
+                'criteria' => $criteria,
+            ],
+            'branding_json' => [],
+            'active' => true,
+        ]);
+
+        $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'TEMPLATE_SAVED_FROM_EVENT', 'EventTemplate', $template->id, newValue: ['name' => $template->name]);
+
+        return back()->with('success', "Configuración de '{$event->name}' guardada como la plantilla '{$template->name}'.");
+    }
+
+    public function create(Request $request)
     {
         $event = null;
+        $templates = EventTemplate::query()->where('active', true)->orderBy('name')->get();
+        $selectedTemplate = null;
+        if ($request->filled('template_id')) {
+            $selectedTemplate = EventTemplate::query()->find($request->input('template_id'));
+        } elseif ($request->filled('template')) {
+            $selectedTemplate = EventTemplate::query()->find($request->input('template'));
+        }
 
-        return view('admin.create', compact('event'));
+        return view('admin.create', compact('event', 'templates', 'selectedTemplate'));
     }
 
     public function store(Request $request)
@@ -286,10 +422,13 @@ class AdminController extends Controller
         if (abs($data['jury_weight_percent'] + $data['public_weight_percent'] - 100) > .001) {
             return back()->withInput()->withErrors(['Los pesos del jurado y el público deben sumar 100%.']);
         }
-        $event = DB::transaction(function () use ($data, $code, $request) {
+        $templateId = $request->input('template_id');
+        $template = $templateId ? EventTemplate::query()->find($templateId) : null;
+
+        $event = DB::transaction(function () use ($data, $code, $request, $template) {
             $event = VotingEvent::query()->create($this->eventPayload($data) + ['code' => $code, 'created_by' => (string) $request->user()->id, 'updated_by' => (string) $request->user()->id]);
             EventBranding::query()->create(['event_id' => $event->id, 'logo_url' => '/images/logo-innovatep.png']);
-            $this->addDefaultRubrics($event, $data['jury_weight_percent'] / 100, $data['public_weight_percent'] / 100);
+            $this->addDefaultRubrics($event, $data['jury_weight_percent'] / 100, $data['public_weight_percent'] / 100, $template);
             $this->audit->write($event->id, 'Administrator', (string) $request->user()->id, 'EVENT_CREATED', 'Event', $event->id, newValue: ['name' => $event->name, 'code' => $event->code]);
 
             return $event;
@@ -1053,8 +1192,39 @@ class AdminController extends Controller
         return in_array($event->status, ['Live', 'Paused', 'Finished', 'Published', 'Archived'], true) || Presentation::query()->where('event_id', $event->id)->where('status', '!=', 'Pending')->exists();
     }
 
-    private function addDefaultRubrics(VotingEvent $event, float $juryWeight, float $publicWeight): void
+    private function addDefaultRubrics(VotingEvent $event, float $juryWeight, float $publicWeight, ?EventTemplate $template = null): void
     {
+        $templateCriteria = $template ? $template->configValue('criteria', []) : [];
+        if (!empty($templateCriteria) && is_array($templateCriteria)) {
+            $juryCriteria = array_values(array_filter($templateCriteria, fn ($c) => ($c['group'] ?? 'Jury') === 'Jury'));
+            $publicCriteria = array_values(array_filter($templateCriteria, fn ($c) => ($c['group'] ?? '') === 'Public'));
+
+            $juryGroup = VotingGroup::query()->create([
+                'event_id' => $event->id, 'name' => 'Jurado', 'role_type' => 'Jury',
+                'weight' => $juryWeight, 'minimum_votes' => 1, 'allow_edit_until_close' => true, 'sort_order' => 1
+            ]);
+            foreach ($juryCriteria as $i => $c) {
+                Criterion::query()->create([
+                    'event_id' => $event->id, 'voting_group_id' => $juryGroup->id,
+                    'sort_order' => $i + 1, 'name' => $c['name'], 'description' => $c['description'] ?? '',
+                    'weight' => (float) ($c['weight'] ?? 0.25), 'minimum_label' => 'Deficiente', 'maximum_label' => 'Excelente'
+                ]);
+            }
+
+            $publicGroup = VotingGroup::query()->create([
+                'event_id' => $event->id, 'name' => 'Público', 'role_type' => 'Public',
+                'weight' => $publicWeight, 'minimum_votes' => 1, 'allow_edit_until_close' => false, 'sort_order' => 2
+            ]);
+            foreach ($publicCriteria as $i => $c) {
+                Criterion::query()->create([
+                    'event_id' => $event->id, 'voting_group_id' => $publicGroup->id,
+                    'sort_order' => $i + 1, 'name' => $c['name'], 'description' => $c['description'] ?? '',
+                    'weight' => (float) ($c['weight'] ?? 0.50), 'minimum_label' => 'Deficiente', 'maximum_label' => 'Excelente'
+                ]);
+            }
+            return;
+        }
+
         foreach ([['Jurado', 'Jury', $juryWeight, [['Claridad', 'La propuesta se comunica con precisión.', .25], ['Innovación', 'La solución presenta un enfoque novedoso.', .25], ['Impacto', 'La propuesta genera valor verificable.', .25], ['Presentación', 'El equipo argumenta y demuestra su solución.', .25]]], ['Público', 'Public', $publicWeight, [['Claridad del resultado', 'La propuesta se entiende fácilmente.', .34], ['Utilidad', 'La solución parece aplicable y valiosa.', .33], ['Presentación', 'El equipo comunica bien su proceso.', .33]]]] as $gi => $g) {
             [$name,$role,$weight,$criteria] = $g;
             $group = VotingGroup::query()->create(['event_id' => $event->id, 'name' => $name, 'role_type' => $role, 'weight' => $weight, 'minimum_votes' => 1, 'allow_edit_until_close' => $role === 'Jury', 'sort_order' => $gi + 1]);

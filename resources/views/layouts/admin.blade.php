@@ -25,8 +25,16 @@
             <a class="{{ $active('admin.event.results') }}" href="{{ route('admin.event.results',$eventId) }}"><span class="material-symbols-outlined">emoji_events</span><span>Resultados</span></a>
             <a class="{{ $active('admin.reports') }}" href="{{ route('admin.reports',$eventId) }}"><span class="material-symbols-outlined">summarize</span><span>Reportes</span></a>
         @endif
+        <a class="{{ $active('admin.profile') }}" href="{{ route('admin.profile') }}"><span class="material-symbols-outlined">account_circle</span><span>Mi Perfil</span></a>
     </nav>
     @if(auth()->user()->isAdministrator())<a class="admin-settings {{ $active('admin.settings') }}" href="{{ route('admin.settings') }}"><span class="material-symbols-outlined">settings</span><span>Configuración</span></a>@endif
+    <a href="{{ route('admin.profile') }}" class="sidebar-user-card {{ $active('admin.profile') }}" title="Ir a mi perfil y seguridad">
+        <span class="user-avatar">{{ strtoupper(substr(auth()->user()->name ?: auth()->user()->email, 0, 1)) }}</span>
+        <div class="user-info">
+            <strong>{{ auth()->user()->name ?: auth()->user()->email }}</strong>
+            <small>{{ auth()->user()->role === 'Administrator' ? 'Administrador' : (auth()->user()->role === 'Operator' ? 'Operador' : 'Auditor') }}</small>
+        </div>
+    </a>
     <form class="admin-logout" action="{{ route('admin.logout') }}" method="post">@csrf<button type="submit"><span class="material-symbols-outlined">logout</span> Cerrar sesión</button></form>
 </aside>
 <div class="admin-shell {{ $isEventContext?'is-event-context':'' }}">
@@ -34,8 +42,11 @@
         <button class="icon-button menu-toggle" type="button" data-menu-toggle aria-label="Abrir menú"><span class="material-symbols-outlined">menu</span></button>
         <a class="topbar-logo" href="{{ route('admin.index') }}"><span class="material-symbols-outlined">leaderboard</span><strong>{{ $isEventContext?trim($__env->yieldContent('title')):'InnovaMente' }}</strong></a>
         <div class="admin-user">
-            <a href="{{ route('admin.profile') }}" title="Mi perfil y seguridad">{{ auth()->user()->name ?: auth()->user()->email }}</a>
-            <span class="avatar"><span class="material-symbols-outlined">person</span></span>
+            <a class="admin-user-btn" href="{{ route('admin.profile') }}" title="Mi perfil y seguridad" style="display: flex; align-items: center; gap: 8px; text-decoration: none; padding: 4px 12px 4px 4px; border-radius: 999px; background: var(--surface-subtle); border: 1px solid var(--border-subtle);">
+                <span class="avatar" style="width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;">{{ strtoupper(substr(auth()->user()->name ?: auth()->user()->email, 0, 1)) }}</span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text);">{{ auth()->user()->name ?: auth()->user()->email }}</span>
+                <span class="badge badge-sm badge-subtle">{{ auth()->user()->role === 'Administrator' ? 'Admin' : (auth()->user()->role === 'Operator' ? 'Operador' : 'Auditor') }}</span>
+            </a>
         </div>
     </header>
     @if(session('success'))<div class="toast toast-success" role="status"><span class="material-symbols-outlined">check_circle</span>{{ session('success') }}</div>@endif

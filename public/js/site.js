@@ -235,13 +235,37 @@
                     const total = Number(item.closest("[data-live-poll]")?.dataset.jurorTotal || 0);
                     if (total > 0) item.style.width = `${Math.min(100, state.jurorVoteCount * 100 / total)}%`;
                 });
-                const structuralChanged = current.slice(0, 4).join("|") !== candidate.slice(0, 4).join("|")
-                    || current[6] !== candidate[6]
-                    || current[7] !== candidate[7]
-                    || current[8] !== candidate[8];
+                const norm = val => (val === null || val === undefined ? "" : String(val).trim().toLowerCase());
+                const structuralChanged = current.slice(0, 4).map(norm).join("|") !== candidate.slice(0, 4).map(norm).join("|")
+                    || norm(current[6]) !== norm(candidate[6])
+                    || norm(current[7]) !== norm(candidate[7])
+                    || norm(current[8]) !== norm(candidate[8]);
                 fingerprint = next;
                 liveRoot.dataset.state = next;
-                if (structuralChanged) window.location.reload();
+
+                if (structuralChanged) {
+                    const activeModal = document.querySelector(".modal-backdrop:not([style*='display: none'])");
+                    // 1. Si la votación se acaba de abrir, cerrar modal de equipo y recargar para mostrar papeleta de votación
+                    if (state.presentationStatus === "VotingOpen") {
+                        if (activeModal && activeModal.id === "public-team-modal") {
+                            activeModal.style.display = "none";
+                        }
+                        window.location.reload();
+                        return;
+                    }
+                    // 2. Si el modal de reiniciar ronda está abierto en control en vivo, no recargar para no interrumpir al operador
+                    if (activeModal && activeModal.id === "restart-round-modal") {
+                        return;
+                    }
+                    // 3. Si el usuario está leyendo detalles del equipo y la presentación sigue siendo la misma, no recargar
+                    if (activeModal && activeModal.id === "public-team-modal") {
+                        const samePresentation = norm(current[2]) === norm(candidate[2]) && norm(current[3]) === norm(candidate[3]);
+                        if (samePresentation) {
+                            return;
+                        }
+                    }
+                    window.location.reload();
+                }
             } catch {
                 document.body.classList.add("connection-lost");
             }
@@ -438,10 +462,10 @@
                 const areaEl = document.getElementById("modal-team-area");
                 const descEl = document.getElementById("modal-team-desc");
                 if (nameEl) nameEl.textContent = data.name || "Equipo";
-                if (numEl) numEl.textContent = `#${data.number || 1}`;
+                if (numEl) numEl.innerHTML = `<span class="material-symbols-outlined" style="font-size: 15px;">groups</span> #${data.number || 1}`;
                 if (projEl) projEl.textContent = data.project || "Propuesta de innovación";
-                if (areaEl) areaEl.textContent = data.area || "General";
-                if (descEl) descEl.textContent = data.description || "Sin descripción.";
+                if (areaEl) areaEl.textContent = data.area || "Innovación";
+                if (descEl) descEl.textContent = data.description || "Sin descripción detallada.";
 
                 const membersBox = document.getElementById("modal-team-members-box");
                 const membersList = document.getElementById("modal-team-members-list");
@@ -450,9 +474,14 @@
                     if (data.members && data.members.length) {
                         membersBox.style.display = "block";
                         data.members.forEach(m => {
-                            const li = document.createElement("li");
-                            li.textContent = m;
-                            membersList.appendChild(li);
+                            const trimmed = String(m).trim();
+                            if (!trimmed) return;
+                            const chip = document.createElement("div");
+                            chip.className = "team-member-chip";
+                            chip.style.cssText = "background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 999px; padding: 4px 12px 4px 6px; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #1E293B; box-shadow: 0 1px 2px rgba(0,0,0,0.04);";
+                            const initial = (trimmed[0] || "M").toUpperCase();
+                            chip.innerHTML = `<span style="width: 24px; height: 24px; border-radius: 50%; background: #0C58C7; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;">${initial}</span><span>${trimmed}</span>`;
+                            membersList.appendChild(chip);
                         });
                     } else {
                         membersBox.style.display = "none";

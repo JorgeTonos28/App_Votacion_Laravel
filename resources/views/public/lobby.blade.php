@@ -9,8 +9,8 @@
         $state['presentationStatus'],
         $state['publicVoteCount'],
         $state['jurorVoteCount'],
-        $state['currentActorHasVoted'] ? 'True' : 'False',
-        $state['timerIsPaused'] ? 'True' : 'False',
+        $state['currentActorHasVoted'] ? 'true' : 'false',
+        $state['timerIsPaused'] ? 'true' : 'false',
         $state['participantFingerprint']
     ]);
     $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
@@ -239,41 +239,64 @@
     </a>
 </nav>
 
-<!-- Modal Genérico de Detalle del Equipo (Solo accesible cuando NO está la votación abierta) -->
+<!-- Modal de Detalle del Equipo (Solo accesible cuando NO está la votación abierta) -->
 <div class="modal-backdrop" id="public-team-modal" style="display: none;">
-    <div class="modal-card" style="max-width: 500px;">
-        <div class="modal-header">
-            <div>
-                <span class="badge badge-subtle" id="modal-team-number">#1</span>
-                <h3 id="modal-team-name" style="margin-top: 4px;">Detalle del Equipo</h3>
+    <div class="modal-card team-showcase-modal" style="max-width: 540px; border-radius: 20px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(4, 46, 128, 0.28), 0 0 0 1px rgba(4, 46, 128, 0.08);">
+        <div class="modal-header team-modal-header" style="background: linear-gradient(135deg, #042E80 0%, #0C58C7 100%); color: #ffffff; padding: 22px 24px; position: relative; border-bottom: none;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+                <div>
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span class="team-badge-pill" id="modal-team-number" style="background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.35); color: #ffffff; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; gap: 4px;">
+                            <span class="material-symbols-outlined" style="font-size: 15px;">groups</span> #1
+                        </span>
+                        <span class="team-area-pill" id="modal-team-area" style="background: #FEA203; color: #17233D; padding: 3px 12px; border-radius: 999px; font-weight: 700; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(254, 162, 3, 0.35);">
+                            Innovación
+                        </span>
+                    </div>
+                    <h2 id="modal-team-name" style="margin: 12px 0 0; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; line-height: 1.2;">
+                        Detalle del Equipo
+                    </h2>
+                </div>
+                <button type="button" class="team-modal-close" data-modal-close="public-team-modal" style="background: rgba(255, 255, 255, 0.15); border: none; color: #ffffff; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease;">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">close</span>
+                </button>
             </div>
-            <button type="button" class="icon-button" data-modal-close="public-team-modal">
-                <span class="material-symbols-outlined">close</span>
+        </div>
+
+        <div class="modal-body stack" style="gap: 18px; padding: 24px; background: #ffffff;">
+            <!-- Caja de Proyecto Destacado -->
+            <div class="team-project-card" style="background: linear-gradient(135deg, #F4F7FB 0%, #EBF2FC 100%); border: 1px solid #D5E2F5; border-left: 5px solid #FEA203; border-radius: 14px; padding: 16px 18px;">
+                <div style="display: flex; align-items: center; gap: 6px; color: #D97706; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px; color: #FEA203;">lightbulb</span> Propuesta / Proyecto
+                </div>
+                <strong id="modal-team-project" style="font-size: 18px; color: #042E80; font-weight: 700; line-height: 1.35; display: block;"></strong>
+            </div>
+
+            <!-- Integrantes del Equipo -->
+            <div id="modal-team-members-box">
+                <div style="display: flex; align-items: center; gap: 6px; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px; color: #0C58C7;">badge</span> Integrantes del Equipo
+                </div>
+                <div id="modal-team-members-list" class="team-members-chips" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <!-- Se llena con chips interactivos con avatar -->
+                </div>
+            </div>
+
+            <!-- Descripción de la Solución -->
+            <div>
+                <div style="display: flex; align-items: center; gap: 6px; color: #475569; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px; color: #042E80;">format_quote</span> Descripción de la Solución
+                </div>
+                <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px 16px;">
+                    <p id="modal-team-desc" style="margin: 0; font-size: 14px; line-height: 1.6; color: #334155; font-weight: 400;"></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; padding: 14px 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0;">
+            <button type="button" class="button button-secondary" data-modal-close="public-team-modal" style="display: inline-flex; align-items: center; gap: 6px; border-radius: 10px; font-weight: 600;">
+                <span class="material-symbols-outlined" style="font-size: 18px;">check</span> Entendido
             </button>
-        </div>
-        <div class="modal-body stack" style="gap: 14px;">
-            <div style="background: var(--surface-subtle); padding: 12px 14px; border-radius: 8px;">
-                <small style="color: var(--text-muted); display: block; margin-bottom: 2px;">Título del Proyecto</small>
-                <strong id="modal-team-project" style="font-size: 15px; color: var(--text);"></strong>
-            </div>
-
-            <div style="background: var(--surface-subtle); padding: 12px 14px; border-radius: 8px;">
-                <small style="color: var(--text-muted); display: block; margin-bottom: 2px;">Área o Categoría</small>
-                <span id="modal-team-area" style="font-size: 14px; color: var(--text); font-weight: 500;"></span>
-            </div>
-
-            <div id="modal-team-members-box" style="background: var(--surface-subtle); padding: 12px 14px; border-radius: 8px;">
-                <small style="color: var(--text-muted); display: block; margin-bottom: 6px;">Integrantes del Equipo</small>
-                <ul id="modal-team-members-list" style="margin: 0; padding-left: 18px; font-size: 14px; color: var(--text);"></ul>
-            </div>
-
-            <div>
-                <small style="color: var(--text-muted); display: block; margin-bottom: 4px;">Descripción de la Solución</small>
-                <p id="modal-team-desc" style="margin: 0; font-size: 14px; line-height: 1.5; color: var(--text);"></p>
-            </div>
-        </div>
-        <div class="modal-footer" style="display: flex; justify-content: flex-end; padding: 12px 16px;">
-            <button type="button" class="button button-ghost" data-modal-close="public-team-modal">Cerrar</button>
         </div>
     </div>
 </div>

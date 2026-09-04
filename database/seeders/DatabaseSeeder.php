@@ -133,19 +133,77 @@ class DatabaseSeeder extends Seeder
             ]);
         }
 
-        foreach ([
-            ['Batalla de Prompts', 'Jurado 70% y público 30% con rúbricas diferenciadas.'],
-            ['Evaluación de proyectos', 'Evaluación técnica estructurada por jurado.'],
-            ['Concurso con jurado y público', 'Pesos configurables para dos grupos.'],
-            ['Premiación por voto popular', 'Selección rápida del público.'],
-            ['Presentaciones con rúbrica', 'Criterios y escalas reutilizables.'],
-        ] as [$name, $description]) {
-            EventTemplate::query()->create([
-                'name' => $name,
-                'description' => $description,
-                'configuration_json' => '{}',
-                'branding_json' => '{}',
-            ]);
+        $templates = [
+            [
+                'name' => 'Batalla de Prompts / Hackathon',
+                'description' => 'Competencia de prompts e inteligencia artificial con jurado 70% y público 30% con rúbricas diferenciadas.',
+                'config' => [
+                    'category' => 'Innovación e IA',
+                    'presentation_duration_seconds' => 300,
+                    'voting_duration_seconds' => 180,
+                    'jury_weight_percent' => 70,
+                    'public_weight_percent' => 30,
+                    'public_access_mode' => 'Device',
+                    'results_visibility' => 'ParticipationOnly',
+                    'criteria' => [
+                        ['group' => 'Jury', 'name' => 'Claridad del prompt', 'description' => 'La instrucción es comprensible, específica y sin ambigüedad.', 'weight' => 0.25],
+                        ['group' => 'Jury', 'name' => 'Estructura y técnica', 'description' => 'Incluye contexto, rol, formato y restricciones clave.', 'weight' => 0.25],
+                        ['group' => 'Jury', 'name' => 'Iteración y optimización', 'description' => 'Demuestra pruebas, refinamiento y evolución del prompt.', 'weight' => 0.25],
+                        ['group' => 'Jury', 'name' => 'Calidad del resultado', 'description' => 'El entregable final es útil y responde con excelencia al reto.', 'weight' => 0.25],
+                        ['group' => 'Public', 'name' => 'Claridad del resultado', 'description' => 'El producto presentado se entiende con facilidad.', 'weight' => 0.50],
+                        ['group' => 'Public', 'name' => 'Utilidad e impacto', 'description' => 'La propuesta es valiosa y aplicable a problemas reales.', 'weight' => 0.50],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'Evaluación de Proyectos / Demo Day',
+                'description' => 'Evaluación técnica estructurada por jurado experto (85%) con acompañamiento del público (15%).',
+                'config' => [
+                    'category' => 'Emprendimiento',
+                    'presentation_duration_seconds' => 360,
+                    'voting_duration_seconds' => 120,
+                    'jury_weight_percent' => 85,
+                    'public_weight_percent' => 15,
+                    'public_access_mode' => 'Device',
+                    'results_visibility' => 'ParticipationOnly',
+                    'criteria' => [
+                        ['group' => 'Jury', 'name' => 'Propuesta de valor', 'description' => 'Resuelve un problema real y define bien a su usuario objetivo.', 'weight' => 0.30],
+                        ['group' => 'Jury', 'name' => 'Viabilidad técnica y económica', 'description' => 'Factibilidad de ejecución y modelo de negocio sostenible.', 'weight' => 0.30],
+                        ['group' => 'Jury', 'name' => 'Diferenciación e innovación', 'description' => 'Grado de novedad frente a alternativas existentes.', 'weight' => 0.25],
+                        ['group' => 'Jury', 'name' => 'Calidad del pitch', 'description' => 'Claridad discursiva, dominio del tema y manejo del tiempo.', 'weight' => 0.15],
+                        ['group' => 'Public', 'name' => 'Atracción general', 'description' => '¿Respaldarías esta solución como usuario o consumidor?', 'weight' => 1.00],
+                    ],
+                ],
+            ],
+            [
+                'name' => 'Premiación por Voto Popular',
+                'description' => 'Selección dinámica y rápida impulsada por la audiencia (80%) con supervisión de jurado (20%).',
+                'config' => [
+                    'category' => 'Votación Abierta',
+                    'presentation_duration_seconds' => 180,
+                    'voting_duration_seconds' => 120,
+                    'jury_weight_percent' => 20,
+                    'public_weight_percent' => 80,
+                    'public_access_mode' => 'Device',
+                    'results_visibility' => 'ParticipationOnly',
+                    'criteria' => [
+                        ['group' => 'Public', 'name' => 'Equipo Favorito del Público', 'description' => 'Voto de preferencia por la mejor propuesta global.', 'weight' => 1.00],
+                        ['group' => 'Jury', 'name' => 'Alineación y Cumplimiento', 'description' => 'Cumplimiento de las reglas y formato del evento.', 'weight' => 1.00],
+                    ],
+                ],
+            ],
+        ];
+
+        foreach ($templates as $t) {
+            EventTemplate::query()->updateOrCreate(
+                ['name' => $t['name']],
+                [
+                    'description' => $t['description'],
+                    'configuration_json' => $t['config'],
+                    'branding_json' => [],
+                    'active' => true,
+                ]
+            );
         }
     }
 }

@@ -10,8 +10,8 @@
         $state['presentationStatus'],
         $state['publicVoteCount'],
         $state['jurorVoteCount'],
-        $state['currentActorHasVoted'] ? 'True' : 'False',
-        $state['timerIsPaused'] ? 'True' : 'False',
+        $state['currentActorHasVoted'] ? 'true' : 'false',
+        $state['timerIsPaused'] ? 'true' : 'false',
         $state['participantFingerprint']
     ]);
     $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
