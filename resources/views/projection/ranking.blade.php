@@ -72,9 +72,9 @@
                     <article class="public-podium-place place-{{ $place }} {{ $item ? '' : 'is-empty' }}">
                         <div class="podium-person">
                             <span class="podium-medal"><span class="material-symbols-outlined">{{ $place === 1 ? 'workspace_premium' : 'military_tech' }}</span></span>
-                            <span class="podium-position">{{ $place }}<sup>{{ $place === 1 ? 'er' : ($place === 2 ? 'do' : 'er') }}</sup></span>
-                            <h3>{{ $item['participantName'] ?? 'Por definir' }}</h3>
-                            <p>{{ $item['projectTitle'] ?? '—' }}</p>
+                            <span class="podium-position">{{ $place === 1 ? '1er Lugar' : ($place === 2 ? '2do Lugar' : '3er Lugar') }}</span>
+                            <h3 title="{{ $item['participantName'] ?? 'Por definir' }}">{{ $item['participantName'] ?? 'Por definir' }}</h3>
+                            <p title="{{ $item['projectTitle'] ?? '—' }}">{{ $item['projectTitle'] ?? '—' }}</p>
                             <strong>{{ number_format($item['finalScore'] ?? 0, 2) }} <small>pts</small></strong>
                         </div>
                         <div class="public-podium-block">
