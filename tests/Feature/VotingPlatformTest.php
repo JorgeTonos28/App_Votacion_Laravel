@@ -998,6 +998,74 @@ class VotingPlatformTest extends TestCase
             ->assertSee('Cierra en');
     }
 
+    public function test_public_voter_with_saved_device_id_is_remembered_without_prompting_name_again(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $deviceId = 'device-test-12345';
+
+        // 1. Primer acceso indicando nombre
+        $response = $this->post(route('event.access'), [
+            'event_code' => $event->code,
+            'device_id' => $deviceId,
+            'display_name' => 'Juan Pérez',
+        ]);
+        $response->assertRedirect(route('public.lobby'));
+        $response->assertCookie('innovamente_device');
+        $response->assertCookie('innovamente_public');
+
+        // Verificar que el votante existe
+        $this->assertDatabaseHas('voters', [
+            'event_id' => $event->id,
+            'display_name' => 'Juan Pérez',
+            'status' => 'Active',
+        ]);
+
+        // 2. Segundo acceso sin cookie de sesión pero con el mismo device_id (como al volver a entrar a la app)
+        $secondAccess = $this->post(route('event.access'), [
+            'event_code' => $event->code,
+            'device_id' => $deviceId,
+            'display_name' => '', // No ingresó el nombre de nuevo
+        ]);
+
+        // Debe detectar al votante existente y entrar directo al lobby sin pedir el nombre
+        $secondAccess->assertRedirect(route('public.lobby'));
+        $secondAccess->assertCookie('innovamente_public');
+
+        // 3. También si entra por URL /e/{code} con el device_id enviado
+        $directUrlAccess = $this->call('GET', route('event.code', $event->code), ['device_id' => $deviceId]);
+        $directUrlAccess->assertRedirect(route('public.lobby'));
+    }
+
+    public function test_results_ranking_gate_is_direct_after_five_minutes_and_animates_when_fresh(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $resultsService = app(ResultService::class);
+
+        // Calcular y publicar resultados ahora mismo
+        $resultsService->calculate($event->id, $admin->id);
+        $resultsService->publish($event->id, $admin->id);
+
+        // Cuando está recién publicado (0 segundos transcurridos), debe tener is-calculating
+        $freshResponse = $this->get(route('projection.ranking', $event->code));
+        $freshResponse->assertOk()
+            ->assertSee('is-calculating')
+            ->assertSee('data-results-fresh="true"', false)
+            ->assertSee('Omitir espera y ver resultados');
+
+        // Si han pasado más de 5 minutos desde la publicación
+        VotingResult::query()->where('event_id', $event->id)->update([
+            'published_at' => now()->subMinutes(6),
+        ]);
+
+        // Debe entrar directo "de plano" con is-revealed y sin is-calculating
+        $oldResponse = $this->get(route('projection.ranking', $event->code));
+        $oldResponse->assertOk()
+            ->assertSee('results-gate is-revealed')
+            ->assertDontSee('results-gate is-calculating')
+            ->assertSee('data-results-fresh="false"', false);
+    }
+
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array
     {
         return [

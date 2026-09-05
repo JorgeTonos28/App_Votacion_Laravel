@@ -1,6 +1,50 @@
 (() => {
     "use strict";
 
+    // Dispositivo público persistente (LocalStorage + Cookie sync)
+    const initDevicePersistence = () => {
+        let deviceId = null;
+        try {
+            deviceId = localStorage.getItem("innovamente_device_id");
+            if (!deviceId) {
+                deviceId = "d_" + ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+                    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+                );
+                localStorage.setItem("innovamente_device_id", deviceId);
+            }
+        } catch {
+            // fallback si localStorage está restringido
+        }
+
+        if (deviceId) {
+            document.querySelectorAll("[data-device-id-input]").forEach(input => {
+                input.value = deviceId;
+            });
+            try {
+                document.cookie = `innovamente_client_device=${deviceId}; max-age=31536000; path=/; SameSite=Lax`;
+            } catch {}
+        }
+
+        const nameInput = document.getElementById("display-name");
+        if (nameInput && !nameInput.value) {
+            try {
+                const savedName = localStorage.getItem("innovamente_display_name");
+                if (savedName) nameInput.value = savedName;
+            } catch {}
+        }
+
+        const accessCard = document.querySelector(".access-card");
+        if (accessCard) {
+            accessCard.addEventListener("submit", () => {
+                const nameVal = document.getElementById("display-name")?.value;
+                if (nameVal) {
+                    try { localStorage.setItem("innovamente_display_name", nameVal.trim()); } catch {}
+                }
+            });
+        }
+    };
+    initDevicePersistence();
+
     const segmented = document.querySelector("[data-segmented-code]");
     if (segmented) {
         const inputs = [...segmented.querySelectorAll("input[data-code-character]")];
@@ -214,11 +258,19 @@
         const duration = Number(resultsGate.dataset.resultsDuration || 30000);
         const stateEndpoint = resultsGate.dataset.resultsState;
         const isPublished = resultsGate.dataset.resultsPublished === "true";
+        const isFresh = resultsGate.dataset.resultsFresh === "true";
         const forceAnimation = resultsGate.dataset.resultsForceAnimation === "true";
         const revealKey = `innovamente-results:${resultsGate.dataset.eventCode}:round-${resultsGate.dataset.roundNumber}`;
         const publishedContent = resultsGate.querySelector(".results-published-content");
         const stageLabel = resultsGate.querySelector("[data-results-stage]");
         let calculationStarted = false;
+
+        // Limpiar parámetro 'transition' de la URL si existe para que recargar la página no vuelva a forzar la animación
+        if (window.location.search.includes("transition=")) {
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.searchParams.delete("transition");
+            window.history.replaceState({}, "", cleanUrl.pathname + (cleanUrl.searchParams.toString() ? "?" + cleanUrl.searchParams.toString() : ""));
+        }
 
         const storage = {
             get: key => { try { return window.sessionStorage.getItem(key); } catch { return null; } },
@@ -230,6 +282,15 @@
             resultsGate.classList.add("is-revealed");
             publishedContent?.setAttribute("aria-hidden", "false");
         };
+
+        const skipBtn = resultsGate.querySelector("[data-results-skip]");
+        if (skipBtn) {
+            skipBtn.addEventListener("click", () => {
+                storage.set(revealKey, "revealed");
+                reveal();
+            });
+        }
+
         const calculate = reloadAfter => {
             if (calculationStarted) return;
             calculationStarted = true;
@@ -252,8 +313,12 @@
         };
 
         if (isPublished) {
-            if (!forceAnimation && storage.get(revealKey) === "revealed") reveal();
-            else calculate(false);
+            // Solo animar si fue publicado recientemente (<= 5 min) Y no ha sido revelado previamente en esta sesión
+            if (!isFresh || (!forceAnimation && storage.get(revealKey) === "revealed")) {
+                reveal();
+            } else {
+                calculate(false);
+            }
         } else {
             storage.remove(revealKey);
             const checkPublication = async () => {
