@@ -50,13 +50,17 @@ class EventQueryService
         $criteria = $group->criteria->where('enabled', true)->where('rubric_version', $version)->sortBy('sort_order')->values();
         $participant = $presentation->participant;
 
+        $timer = $this->timer($event, $presentation);
+
         return [
             'presentationId' => $presentation->id, 'participantId' => $presentation->participant_id,
             'participantName' => $participant->name, 'projectTitle' => $participant->project_title,
             'participantNumber' => $participant->number, 'participantMembers' => $participant->member_names,
             'participantArea' => $participant->area, 'participantDescription' => $participant->description,
             'groupName' => $group->name, 'roleType' => $role,
-            'votingClosesAt' => $this->timer($event, $presentation)['endsAt']?->toIso8601String(),
+            'votingClosesAt' => $timer['endsAt']?->toIso8601String(),
+            'timerRemainingSeconds' => $timer['remaining'],
+            'timerIsPaused' => $timer['paused'],
             'criteria' => $criteria,
         ];
     }
@@ -104,12 +108,19 @@ class EventQueryService
         if (! $started) {
             return ['endsAt' => null, 'remaining' => null, 'paused' => false];
         }
-        $duration = $presentation->status === 'OnStage' ? $event->presentation_duration_seconds : $event->voting_duration_seconds;
+        $baseDuration = $presentation->status === 'OnStage' ? (int) $event->presentation_duration_seconds : (int) $event->voting_duration_seconds;
+        $totalDuration = $baseDuration + (int) ($presentation->extra_seconds ?? 0);
+        $paused = ($event->status === 'Paused') || ($presentation->timer_paused_at !== null);
         $until = $presentation->timer_paused_at ?: now();
-        $elapsed = max(0, (int) round($started->diffInSeconds($until)) - (int) $presentation->paused_timer_seconds);
-        $remaining = max(0, (int) $duration - $elapsed);
-        $paused = $event->status === 'Paused' && $presentation->timer_paused_at !== null;
+        $totalWallClock = max(0, (int) round($started->diffInSeconds($until)));
+        $pausedSeconds = (int) ($presentation->paused_timer_seconds ?? 0);
+        $elapsed = max(0, $totalWallClock - $pausedSeconds);
+        $remaining = max(0, $totalDuration - $elapsed);
 
-        return ['endsAt' => $paused ? null : now()->addSeconds($remaining), 'remaining' => $remaining, 'paused' => $paused];
+        return [
+            'endsAt' => $paused ? null : now()->addSeconds($remaining),
+            'remaining' => $remaining,
+            'paused' => $paused,
+        ];
     }
 }

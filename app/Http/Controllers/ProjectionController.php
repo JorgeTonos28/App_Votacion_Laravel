@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Exceptions\DomainException;
 use App\Models\VotingEvent;
+use App\Models\VotingResult;
 use App\Services\EventQueryService;
 use App\Services\ResultService;
 use App\Support\Domain;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class ProjectionController extends Controller
@@ -31,7 +33,30 @@ class ProjectionController extends Controller
         $state = $this->queries->liveStateByCode($event->code);
         $ranking = $published ? $this->results->ranking($event->id) : [];
 
-        return view('projection.ranking', compact('event', 'state', 'ranking', 'published'));
+        $publishedAt = null;
+        if ($published) {
+            $round = (int) ($event->current_round ?: 1);
+            $publishedAt = VotingResult::query()
+                ->where('event_id', $event->id)
+                ->where('round_number', $round)
+                ->whereNotNull('published_at')
+                ->max('published_at')
+                ?: VotingResult::query()
+                    ->where('event_id', $event->id)
+                    ->whereNotNull('published_at')
+                    ->max('published_at');
+        }
+
+        // Solo mostrar animación si fue publicado hace menos de 5 minutos (300s)
+        $secondsSincePublished = null;
+        $isFreshlyPublished = false;
+        if ($published && $publishedAt) {
+            $carbonPublished = Carbon::parse($publishedAt);
+            $secondsSincePublished = $carbonPublished->isFuture() ? 0 : (int) $carbonPublished->diffInSeconds(now());
+            $isFreshlyPublished = $secondsSincePublished <= 300;
+        }
+
+        return view('projection.ranking', compact('event', 'state', 'ranking', 'published', 'isFreshlyPublished', 'secondsSincePublished'));
     }
 
     public function state(string $eventCode)

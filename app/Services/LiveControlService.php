@@ -35,7 +35,7 @@ class LiveControlService
             if (! $event) {
                 throw $this->notFound();
             }
-            if (! in_array($event->status, ['Live', 'LobbyOpen'], true)) {
+            if (! in_array($event->status, ['Live', 'LobbyOpen', 'Paused'], true)) {
                 throw $this->invalidTransition();
             }
             $presentations = $event->presentations->where('round_number', $event->current_round);
@@ -53,7 +53,14 @@ class LiveControlService
                 throw $this->invalidTransition();
             }
             $previous = $presentation->status;
-            $presentation->update(['status' => 'OnStage', 'stage_started_at' => now(), 'timer_paused_at' => null, 'paused_timer_seconds' => 0, 'version' => $presentation->version + 1]);
+            $presentation->update([
+                'status' => 'OnStage',
+                'stage_started_at' => now(),
+                'timer_paused_at' => null,
+                'paused_timer_seconds' => 0,
+                'extra_seconds' => 0,
+                'version' => $presentation->version + 1,
+            ]);
             $event->update(['status' => 'Live', 'active_presentation_id' => $presentation->id]);
             $this->audit->write($eventId, 'Operator', $actorId, 'PRESENTATION_STARTED', 'Presentation', $presentation->id, $previous, 'OnStage');
         });
@@ -65,14 +72,26 @@ class LiveControlService
         if (! $event) {
             throw $this->notFound();
         }
-        if ($event->status !== 'Live' || $event->active_presentation_id !== $presentationId) {
+        if (! in_array($event->status, ['Live', 'Paused'], true) || $event->active_presentation_id !== $presentationId) {
             throw $this->invalidTransition();
         }
         $p = $event->presentations->firstWhere('id', $presentationId);
         if (! $p || ! in_array($p->status, ['OnStage', 'VotingClosed'], true)) {
             throw $this->invalidTransition();
         }
-        $p->update(['status' => 'VotingOpen', 'stage_ended_at' => $p->stage_ended_at ?: now(), 'voting_opened_at' => now(), 'voting_closed_at' => null, 'timer_paused_at' => null, 'paused_timer_seconds' => 0, 'version' => $p->version + 1]);
+        $p->update([
+            'status' => 'VotingOpen',
+            'stage_ended_at' => $p->stage_ended_at ?: now(),
+            'voting_opened_at' => now(),
+            'voting_closed_at' => null,
+            'timer_paused_at' => null,
+            'paused_timer_seconds' => 0,
+            'extra_seconds' => 0,
+            'version' => $p->version + 1,
+        ]);
+        if ($event->status === 'Paused') {
+            $event->update(['status' => 'Live']);
+        }
         $this->audit->write($eventId, 'Operator', $actorId, 'VOTING_OPENED', 'Presentation', $presentationId);
     }
 
@@ -143,8 +162,12 @@ class LiveControlService
         }
         $p = $event->presentations->firstWhere('id', $event->active_presentation_id);
         if ($p?->timer_paused_at) {
-            $seconds = $p->timer_paused_at->diffInSeconds(now());
-            $p->update(['paused_timer_seconds' => $p->paused_timer_seconds + $seconds, 'timer_paused_at' => null, 'version' => $p->version + 1]);
+            $seconds = (int) round($p->timer_paused_at->diffInSeconds(now()));
+            $p->update([
+                'paused_timer_seconds' => (int) $p->paused_timer_seconds + $seconds,
+                'timer_paused_at' => null,
+                'version' => $p->version + 1,
+            ]);
         }
         $event->update(['status' => 'Live']);
         $this->audit->write($eventId, 'Operator', $actorId, 'EVENT_RESUMED', 'Event', $eventId, newValue: ['presentationId' => $p?->id]);
@@ -187,6 +210,7 @@ class LiveControlService
                 'voting_closed_at' => null,
                 'timer_paused_at' => null,
                 'paused_timer_seconds' => 0,
+                'extra_seconds' => 0,
                 'version' => $presentation->version + 1,
             ]);
 
@@ -212,7 +236,7 @@ class LiveControlService
             throw new DomainException('INVALID_TRANSITION', 'Solo se puede agregar tiempo a un turno activo o en votación.', 409);
         }
         $presentation->update([
-            'paused_timer_seconds' => $presentation->paused_timer_seconds + max(1, $seconds),
+            'extra_seconds' => (int) ($presentation->extra_seconds ?? 0) + max(1, $seconds),
             'version' => $presentation->version + 1,
         ]);
         $this->audit->write($eventId, 'Operator', $actorId, 'PRESENTATION_TIME_ADDED', 'Presentation', $presentationId, null, ['added_seconds' => $seconds]);

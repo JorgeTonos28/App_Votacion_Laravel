@@ -33,7 +33,11 @@ class HomeController extends Controller
             }
         }
 
-        $deviceId = $request->cookie('innovamente_device') ?: Str::uuid()->toString();
+        $deviceId = $request->input('device_id')
+            ?: $request->cookie('innovamente_client_device')
+            ?: $request->cookie('innovamente_device')
+            ?: Str::uuid()->toString();
+
         $model = ['eventCode' => $code ?? '', 'requiresIdentity' => false, 'requiresAccessCredential' => false, 'accessMode' => null];
         if ($code) {
             try {
@@ -52,8 +56,9 @@ class HomeController extends Controller
                     if ($existingVoter && !empty($existingVoter->display_name)) {
                         [$token] = $this->sessions->createPublic($event, $deviceId, null, $existingVoter->display_name, $request->userAgent());
                         return redirect()->route('public.lobby')
-                            ->cookie('innovamente_device', $deviceId, 525600, null, null, $request->isSecure(), true, false, 'Lax')
-                            ->cookie('innovamente_public', $token, 720, null, null, $request->isSecure(), true, false, 'Lax');
+                            ->cookie('innovamente_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax')
+                            ->cookie('innovamente_client_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax')
+                            ->cookie('innovamente_public', $token, 720, '/', null, $request->isSecure(), true, false, 'Lax');
                     }
                 }
             } catch (DomainException) {
@@ -61,22 +66,33 @@ class HomeController extends Controller
         }
 
         $response = response()->view('home.index', compact('model'));
-        if (! $request->cookie('innovamente_device')) {
-            $response->cookie('innovamente_device', $deviceId, 525600, null, null, $request->isSecure(), true, false, 'Lax');
-        }
+        $response->cookie('innovamente_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax');
+        $response->cookie('innovamente_client_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax');
 
         return $response;
     }
 
     public function access(Request $request)
     {
-        $data = $request->validate(['event_code' => 'required|string|min:4|max:12', 'display_name' => 'nullable|string|max:180', 'access_credential' => 'nullable|string|max:180'], ['event_code.required' => 'Ingresa el código del evento.']);
+        $data = $request->validate([
+            'event_code' => 'required|string|min:4|max:12',
+            'device_id' => 'nullable|string|max:120',
+            'display_name' => 'nullable|string|max:180',
+            'access_credential' => 'nullable|string|max:180'
+        ], [
+            'event_code.required' => 'Ingresa el código del evento.'
+        ]);
+
         $model = ['eventCode' => $data['event_code'], 'requiresIdentity' => false, 'requiresAccessCredential' => false, 'accessMode' => null];
         try {
             $event = $this->access->findAvailableEvent($data['event_code']);
             $model = $this->modelForEvent($event);
 
-            $deviceId = $request->cookie('innovamente_device') ?: Str::uuid()->toString();
+            $deviceId = ($data['device_id'] ?? null)
+                ?: $request->cookie('innovamente_client_device')
+                ?: $request->cookie('innovamente_device')
+                ?: Str::uuid()->toString();
+
             $deviceHash = Domain::technicalHash($deviceId);
             $existingVoter = Voter::query()
                 ->where('event_id', $event->id)
@@ -99,8 +115,9 @@ class HomeController extends Controller
         }
 
         return redirect()->route('public.lobby')
-            ->cookie('innovamente_device', $deviceId, 525600, null, null, $request->isSecure(), true, false, 'Lax')
-            ->cookie('innovamente_public', $token, 720, null, null, $request->isSecure(), true, false, 'Lax');
+            ->cookie('innovamente_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax')
+            ->cookie('innovamente_client_device', $deviceId, 525600, '/', null, $request->isSecure(), false, false, 'Lax')
+            ->cookie('innovamente_public', $token, 720, '/', null, $request->isSecure(), true, false, 'Lax');
     }
 
     public function error(?string $code = null)

@@ -789,7 +789,8 @@ class VotingPlatformTest extends TestCase
         ])->assertRedirect()->assertSessionHas('success');
 
         $presentation->refresh();
-        $this->assertSame(60, $presentation->paused_timer_seconds);
+        $this->assertSame(60, $presentation->extra_seconds);
+        $this->assertSame(0, $presentation->paused_timer_seconds);
 
         $this->actingAs($admin)->post(route('admin.control', [$event, 'reset_turn']), [
             'presentation_id' => $presentation->id,
@@ -797,7 +798,43 @@ class VotingPlatformTest extends TestCase
 
         $presentation->refresh();
         $this->assertSame('Pending', $presentation->status);
+        $this->assertSame(0, $presentation->extra_seconds);
         $this->assertNull($event->fresh()->active_presentation_id);
+    }
+
+    public function test_live_control_can_open_voting_when_paused_and_timer_recalculates(): void
+    {
+        \Illuminate\Support\Carbon::setTestNow(now());
+        try {
+            $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+            $event = VotingEvent::query()->with(['presentations.participant'])->where('code', 'BTP726')->firstOrFail();
+            $presentation = $event->presentations->first();
+            $actorId = (string) $admin->id;
+            $control = app(LiveControlService::class);
+            $queries = app(\App\Services\EventQueryService::class);
+
+            $control->operate($event->id, 'start', $actorId);
+            $control->operate($event->id, 'presentation', $actorId, $presentation->participant_id);
+            $control->operate($event->id, 'pause', $actorId);
+
+            $event->refresh();
+            $this->assertSame('Paused', $event->status);
+
+            // Can open voting even when paused
+            $control->operate($event->id, 'open', $actorId, presentationId: $presentation->id);
+            $event->refresh();
+            $presentation->refresh();
+            $this->assertSame('Live', $event->status);
+            $this->assertSame('VotingOpen', $presentation->status);
+
+            // Timer is active and has correct voting duration
+            $state = $queries->liveStateByCode($event->code);
+            $this->assertFalse($state['timerIsPaused']);
+            $this->assertGreaterThanOrEqual($event->voting_duration_seconds - 1, $state['timerRemainingSeconds']);
+            $this->assertLessThanOrEqual($event->voting_duration_seconds, $state['timerRemainingSeconds']);
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
     }
 
     public function test_user_can_update_own_profile_and_change_password(): void
@@ -918,6 +955,115 @@ class VotingPlatformTest extends TestCase
         ])->assertRedirect()->assertSessionHas('success');
 
         $this->assertTrue(\App\Models\EventTemplate::query()->where('name', 'Copia de Pitch Competition')->exists());
+    }
+
+    public function test_jury_dashboard_and_ballot_render_timer_when_presentation_is_active(): void
+    {
+        $event = VotingEvent::query()->with(['presentations', 'jurors'])->where('code', 'BTP726')->firstOrFail();
+        $juror = $event->jurors->firstOrFail();
+        $presentation = $event->presentations->firstOrFail();
+
+        // 1. Iniciar presentación (OnStage)
+        $control = app(LiveControlService::class);
+        $operatorId = (string) Str::uuid();
+        $control->operate($event->id, 'start', $operatorId);
+        $control->operate($event->id, 'presentation', $operatorId, $presentation->participant_id);
+
+        $sessionService = app(\App\Services\EventSessionService::class);
+        [$token] = $sessionService->createJuror($event, $juror, 'Mozilla/5.0');
+
+        // Juror dashboard should render timer-card and data-countdown or paused timer
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.dashboard'))
+            ->assertOk()
+            ->assertSee('timer-card')
+            ->assertSee('Tiempo de exposición / pitch')
+            ->assertSee('data-countdown', false);
+
+        // 2. Abrir votación (VotingOpen)
+        $control->operate($event->id, 'open', $operatorId, presentationId: $presentation->id);
+
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.dashboard'))
+            ->assertOk()
+            ->assertSee('timer-card')
+            ->assertSee('Tiempo restante de votación')
+            ->assertSee('data-countdown', false);
+
+        // Juror ballot should also display timer
+        $this->withCookie('innovamente_juror', $token)
+            ->get(route('jury.ballot'))
+            ->assertOk()
+            ->assertSee('data-countdown', false)
+            ->assertSee('Cierra en');
+    }
+
+    public function test_public_voter_with_saved_device_id_is_remembered_without_prompting_name_again(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $deviceId = 'device-test-12345';
+
+        // 1. Primer acceso indicando nombre
+        $response = $this->post(route('event.access'), [
+            'event_code' => $event->code,
+            'device_id' => $deviceId,
+            'display_name' => 'Juan Pérez',
+        ]);
+        $response->assertRedirect(route('public.lobby'));
+        $response->assertCookie('innovamente_device');
+        $response->assertCookie('innovamente_public');
+
+        // Verificar que el votante existe
+        $this->assertDatabaseHas('voters', [
+            'event_id' => $event->id,
+            'display_name' => 'Juan Pérez',
+            'status' => 'Active',
+        ]);
+
+        // 2. Segundo acceso sin cookie de sesión pero con el mismo device_id (como al volver a entrar a la app)
+        $secondAccess = $this->post(route('event.access'), [
+            'event_code' => $event->code,
+            'device_id' => $deviceId,
+            'display_name' => '', // No ingresó el nombre de nuevo
+        ]);
+
+        // Debe detectar al votante existente y entrar directo al lobby sin pedir el nombre
+        $secondAccess->assertRedirect(route('public.lobby'));
+        $secondAccess->assertCookie('innovamente_public');
+
+        // 3. También si entra por URL /e/{code} con el device_id enviado
+        $directUrlAccess = $this->call('GET', route('event.code', $event->code), ['device_id' => $deviceId]);
+        $directUrlAccess->assertRedirect(route('public.lobby'));
+    }
+
+    public function test_results_ranking_gate_is_direct_after_five_minutes_and_animates_when_fresh(): void
+    {
+        $event = VotingEvent::query()->where('code', 'BTP726')->firstOrFail();
+        $admin = User::query()->where('email', 'admin@innovamente.local')->firstOrFail();
+        $resultsService = app(ResultService::class);
+
+        // Calcular y publicar resultados ahora mismo
+        $resultsService->calculate($event->id, $admin->id);
+        $resultsService->publish($event->id, $admin->id);
+
+        // Cuando está recién publicado (0 segundos transcurridos), debe tener is-calculating
+        $freshResponse = $this->get(route('projection.ranking', $event->code));
+        $freshResponse->assertOk()
+            ->assertSee('is-calculating')
+            ->assertSee('data-results-fresh="true"', false)
+            ->assertSee('Omitir espera y ver resultados');
+
+        // Si han pasado más de 5 minutos desde la publicación
+        VotingResult::query()->where('event_id', $event->id)->update([
+            'published_at' => now()->subMinutes(6),
+        ]);
+
+        // Debe entrar directo "de plano" con is-revealed y sin is-calculating
+        $oldResponse = $this->get(route('projection.ranking', $event->code));
+        $oldResponse->assertOk()
+            ->assertSee('results-gate is-revealed')
+            ->assertDontSee('results-gate is-calculating')
+            ->assertSee('data-results-fresh="false"', false);
     }
 
     private function sessionPayload(string $eventId, string $actorId, string $actorType): array

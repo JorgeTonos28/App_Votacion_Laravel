@@ -11,7 +11,7 @@
 @endphp
 
 @section('content')
-<main class="ranking-stage results-gate {{ $published ? 'is-calculating' : 'is-waiting' }}" data-results-gate data-results-published="{{ $published ? 'true' : 'false' }}" data-results-force-animation="{{ in_array(request()->query('transition'), ['projection', 'lobby'], true) ? 'true' : 'false' }}" data-results-state="{{ route('projection.state', $event->code) }}" data-results-duration="30000" data-event-code="{{ $event->code }}" data-round-number="{{ $state['roundNumber'] }}">
+<main class="ranking-stage results-gate {{ $published ? ($isFreshlyPublished ? 'is-calculating' : 'is-revealed') : 'is-waiting' }}" data-results-gate data-results-published="{{ $published ? 'true' : 'false' }}" data-results-fresh="{{ $isFreshlyPublished ? 'true' : 'false' }}" data-results-force-animation="{{ $isFreshlyPublished && in_array(request()->query('transition'), ['projection', 'lobby'], true) ? 'true' : 'false' }}" data-results-state="{{ route('projection.state', $event->code) }}" data-results-duration="30000" data-event-code="{{ $event->code }}" data-round-number="{{ $state['roundNumber'] }}">
     <div class="ranking-orb ranking-orb-one"></div>
     <div class="ranking-orb ranking-orb-two"></div>
     <div class="ranking-watermark">INNOVAMENTE</div>
@@ -32,11 +32,16 @@
                 <p data-results-stage>Recopilando las evaluaciones recibidas…</p>
                 <div class="results-progress" aria-hidden="true"><span></span></div>
                 <small>Validando votos, ponderaciones y posiciones finales</small>
+                <div class="results-skip-wrap">
+                    <button type="button" class="results-skip-button" data-results-skip>
+                        <span class="material-symbols-outlined">bolt</span> Omitir espera y ver resultados
+                    </button>
+                </div>
             </div>
         </div>
     </section>
 
-    @if($published)<div class="ranking-content results-published-content" aria-hidden="true">
+    @if($published)<div class="ranking-content results-published-content" aria-hidden="{{ $isFreshlyPublished ? 'true' : 'false' }}">
         <header class="ranking-heading">
             <div>
                 <span class="ranking-kicker"><span></span>{{ $event->name }}</span>
@@ -45,7 +50,7 @@
             </div>
             <div class="ranking-heading-actions">
                 <span class="ranking-live-badge"><span class="material-symbols-outlined">verified</span> Ranking publicado</span>
-                <a class="ranking-link-button" href="{{ route('projection.live', $event->code) }}"><span class="material-symbols-outlined">live_tv</span> Volver a proyección</a>
+                <a class="ranking-link-button ranking-projection-link" href="{{ route('projection.live', $event->code) }}"><span class="material-symbols-outlined">live_tv</span> Volver a proyección</a>
             </div>
         </header>
 
@@ -67,9 +72,9 @@
                     <article class="public-podium-place place-{{ $place }} {{ $item ? '' : 'is-empty' }}">
                         <div class="podium-person">
                             <span class="podium-medal"><span class="material-symbols-outlined">{{ $place === 1 ? 'workspace_premium' : 'military_tech' }}</span></span>
-                            <span class="podium-position">{{ $place }}<sup>{{ $place === 1 ? 'er' : ($place === 2 ? 'do' : 'er') }}</sup></span>
-                            <h3>{{ $item['participantName'] ?? 'Por definir' }}</h3>
-                            <p>{{ $item['projectTitle'] ?? '—' }}</p>
+                            <span class="podium-position">{{ $place === 1 ? '1er Lugar' : ($place === 2 ? '2do Lugar' : '3er Lugar') }}</span>
+                            <h3 title="{{ $item['participantName'] ?? 'Por definir' }}">{{ $item['participantName'] ?? 'Por definir' }}</h3>
+                            <p title="{{ $item['projectTitle'] ?? '—' }}">{{ $item['projectTitle'] ?? '—' }}</p>
                             <strong>{{ number_format($item['finalScore'] ?? 0, 2) }} <small>pts</small></strong>
                         </div>
                         <div class="public-podium-block">

@@ -3,7 +3,7 @@
 @section('title', 'Proyección en vivo')
 
 @php
-    $fingerprint = implode('|', [$state['eventStatus'], $state['roundNumber'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'True' : 'False', $state['timerIsPaused'] ? 'True' : 'False', $state['participantFingerprint']]);
+    $fingerprint = implode('|', [$state['eventStatus'], $state['roundNumber'], $state['presentationId'], $state['presentationStatus'], $state['publicVoteCount'], $state['jurorVoteCount'], $state['currentActorHasVoted'] ? 'true' : 'false', $state['timerIsPaused'] ? 'true' : 'false', $state['participantFingerprint']]);
     $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
 @endphp
 
@@ -33,7 +33,7 @@
         </div>
         <div class="projection-timer">
             <small>Tiempo restante</small>
-            @if($state['timerEndsAt'])<strong data-countdown="{{ $state['timerEndsAt'] }}">{{ $timer }}</strong>@else<strong data-paused-timer>{{ $timer }}</strong>@endif
+            @if($state['timerEndsAt'])<strong data-countdown="{{ $state['timerEndsAt'] }}" data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="{{ $state['timerIsPaused'] ? '1' : '0' }}">{{ $timer }}</strong>@else<strong data-paused-timer data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="1">{{ $timer }}</strong>@endif
         </div>
     </section>
 

@@ -15,6 +15,9 @@
         $state['participantFingerprint']
     ]);
     $isVotingOpen = $state['presentationStatus'] === 'VotingOpen';
+    $isOnStage = $state['presentationStatus'] === 'OnStage';
+    $hasActivePresentation = !empty($state['presentationId']) && in_array($state['presentationStatus'], ['OnStage', 'VotingOpen'], true);
+    $timer = $state['timerRemainingSeconds'] === null ? '--:--' : sprintf('%02d:%02d', intdiv($state['timerRemainingSeconds'], 60), $state['timerRemainingSeconds'] % 60);
 @endphp
 
 @section('content')
@@ -26,7 +29,7 @@
     <span class="connection-pill">Conectado · {{ $juror->name }}</span>
 </header>
 
-<main class="mobile-content" data-live-poll="{{ route('jury.state') }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}?transition=lobby" data-poll-interval="4000" data-state="{{ $fingerprint }}">
+<main class="mobile-content" data-live-poll="{{ route('jury.state') }}" data-results-redirect="{{ route('projection.ranking', $event->code) }}?transition=lobby" data-poll-interval="3000" data-state="{{ $fingerprint }}">
     @if($isVotingOpen && !$state['currentActorHasVoted'])
         <div class="notice-banner" style="background: rgba(34, 197, 94, 0.15); border-left: 4px solid var(--success, #22c55e);">
             <span class="material-symbols-outlined" style="color: var(--success, #22c55e); font-size: 32px;">campaign</span>
@@ -35,6 +38,35 @@
                 <br>La rúbrica para <strong>{{ $state['participantName'] }}</strong> ya está disponible.
             </div>
         </div>
+    @endif
+
+    @if($hasActivePresentation)
+        <!-- Tarjeta de Tiempo / Cronómetro en Vivo para Jurados -->
+        <section class="card timer-card" style="margin-bottom: 16px; border-left: 4px solid {{ $isVotingOpen ? 'var(--success, #22c55e)' : 'var(--primary, #042E80)' }};">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span class="eyebrow" style="margin: 0; color: {{ $isVotingOpen ? 'var(--success, #22c55e)' : 'var(--primary, #042E80)' }};">
+                    {{ $isVotingOpen ? 'Tiempo restante de votación' : 'Tiempo de exposición / pitch' }}
+                </span>
+                <span class="badge {{ $isVotingOpen ? 'badge-live' : 'badge-warning' }}" style="font-size: 11px;">
+                    {{ $isVotingOpen ? 'Votación abierta' : 'En escenario' }}
+                </span>
+            </div>
+
+            @if($state['timerEndsAt'])
+                <div class="timer" data-countdown="{{ $state['timerEndsAt'] }}" data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="{{ $state['timerIsPaused'] ? '1' : '0' }}" style="font-size: 2.7rem; font-weight: 800; margin: 0.5rem 0;">{{ $timer }}</div>
+            @else
+                <div class="timer" data-paused-timer data-timer-remaining="{{ $state['timerRemainingSeconds'] }}" data-timer-paused="1" style="font-size: 2.7rem; font-weight: 800; margin: 0.5rem 0;">{{ $timer }}</div>
+            @endif
+
+            <p style="margin: 0; font-size: 13px; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <span class="material-symbols-outlined" style="font-size: 16px;">schedule</span>
+                @if($isVotingOpen)
+                    Equipo actual: <strong>{{ $state['participantName'] }}</strong>
+                @else
+                    Presentando: <strong>{{ $state['participantName'] }}</strong>
+                @endif
+            </p>
+        </section>
     @endif
 
     <section class="card jury-progress">
